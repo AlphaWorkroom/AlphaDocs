@@ -21,6 +21,10 @@ After a native release build, run `python scripts/prepare_dist.py`. It assembles
 
 Do not publish `target`, local profiles, QA documents, proprietary reference screenshots, authentication material or development logs. Dev/test profiles omit large debug symbols/incremental copies. `cargo clean` removes regenerable output; preserve verified artifacts first.
 
+## Demonstration media
+
+`examples/readme_fixture.rs` creates original, formatted book/guide/brief documents only when an isolated `ALPHADOCS_DATA_DIR` is set. Public sample documents live in `examples/documents`. README captures show the actual native app, with no private documents or live invitations. `python scripts/build_promo.py` uses Pillow, ffmpeg, bundled OFL fonts and those captures to regenerate the GIFs and silent 32-second 1080p promo. Keep captions within their panels and check encoded video/GIF frames before publishing.
+
 ## Publishing
 
 Push to `main` to run four native installer builds: Windows x86-64, Linux x86-64, macOS Apple silicon and macOS Intel. Review workflow artifacts. A version tag matching Cargo.toml runs the same gates and creates a public GitHub Release **only after every native build and installer check succeeds**. Apple signing/notarisation is not implied.

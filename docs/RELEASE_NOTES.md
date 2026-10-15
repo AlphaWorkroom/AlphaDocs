@@ -6,5 +6,6 @@ AlphaDocs by Alpha Workroom: a native offline document editor with the supplied 
 - Optional daily GitHub update checks, manual Help/About access and matching installer downloads. Checks never send document content or execute updates.
 - Independent open-document tabs, `.adocs` downloads, local autosave/history, rich content, comments, offline proofing and reversible image editing.
 - Theme-aware owner branding, file-location access, scrolling titles and undoable image drops between paragraph lines.
+- A refreshed project page with formatted book/guide/brief examples, chapter/file-tab GIFs, sharing and crop demonstrations, and a 32-second promo video.
 
 Downloads include licences/notices and checksums. Windows printing is implemented; Linux/macOS native printing remains outstanding. Interchange formats support a documented subset. macOS PKGs are unsigned and not Apple-notarised; app bundles have ad-hoc signatures. Read the installation notes before choosing a package.

@@ -21,7 +21,8 @@ arch = "aarch64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
 outputs = []
 
 if sys.platform == "darwin":
-    app = work / "AlphaDocs.app"
+    payload = work / "macos-payload"
+    app = payload / "AlphaDocs.app"
     macos = app / "Contents/MacOS"
     resources = app / "Contents/Resources"
     macos.mkdir(parents=True, exist_ok=True)
@@ -40,8 +41,16 @@ if sys.platform == "darwin":
             "CFBundleDocumentTypes": [{"CFBundleTypeName": "AlphaDocs document", "CFBundleTypeExtensions": ["adocs"], "CFBundleTypeRole": "Editor", "LSHandlerRank": "Owner"}]}
     (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
     subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
+    # A relocatable component can silently "install" into the build-tree copy
+    # found by Spotlight instead of /Applications. Pin the intended location.
+    components = work / "components.plist"
+    subprocess.run(["pkgbuild", "--analyze", "--root", str(payload), str(components)], check=True)
+    entries = plistlib.loads(components.read_bytes())
+    for entry in entries:
+        entry["BundleIsRelocatable"] = False
+    components.write_bytes(plistlib.dumps(entries))
     pkg = out / f"AlphaDocs-macOS-{arch}.pkg"
-    subprocess.run(["pkgbuild", "--component", str(app), "--install-location", "/Applications", "--identifier", "studio.alphaworkroom.alphadocs", "--version", version, str(pkg)], check=True)
+    subprocess.run(["pkgbuild", "--root", str(payload), "--component-plist", str(components), "--install-location", "/Applications", "--identifier", "studio.alphaworkroom.alphadocs", "--version", version, str(pkg)], check=True)
     subprocess.run([str(macos / "alphadocs"), "--self-check"], check=True)
     outputs.append(pkg)
     portable = out / f"AlphaDocs-macOS-{arch}.tar.gz"
@@ -62,7 +71,7 @@ elif sys.platform == "linux":
     shutil.copyfile(root / "assets/alphadocs-icon.png", icon)
     control = package / "DEBIAN"
     control.mkdir(exist_ok=True)
-    (control / "control").write_text(f"Package: alphadocs\nVersion: {version}\nArchitecture: amd64\nMaintainer: Alpha Workroom\nSection: editors\nPriority: optional\nDepends: libc6 (>= 2.35), libgcc-s1, libfontconfig1, libx11-6, libxcb1, libxkbcommon0, libwayland-client0, libegl1, libgl1\nRecommends: xdg-desktop-portal, xdg-desktop-portal-gtk\nHomepage: https://github.com/AlphaWorkroom/AlphaDocs\nDescription: Offline native document editor by Alpha Workroom\n", encoding="utf-8")
+    (control / "control").write_text(f"Package: alphadocs\nVersion: {version}\nArchitecture: amd64\nMaintainer: Alpha Workroom\nSection: editors\nPriority: optional\nDepends: libc6 (>= 2.35), libgcc-s1, libfontconfig1, libx11-6, libx11-xcb1, libxcursor1, libxrandr2, libxi6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libwayland-cursor0, libwayland-egl1, libegl1, libgl1\nRecommends: xdg-desktop-portal, xdg-desktop-portal-gtk\nHomepage: https://github.com/AlphaWorkroom/AlphaDocs\nDescription: Offline native document editor by Alpha Workroom\n", encoding="utf-8")
     deb = out / "AlphaDocs-Linux-x86_64.deb"
     subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(package), str(deb)], check=True)
     outputs.append(deb)

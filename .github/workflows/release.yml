@@ -51,7 +51,7 @@ jobs:
           cache-on-failure: true
       - name: Linux native dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libwayland-dev libdbus-1-dev libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libdbus-1-dev libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo test --locked
@@ -82,6 +82,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y ./releases/AlphaDocs-Linux-x86_64.deb
+          cmp LICENSE /opt/alphadocs/LICENSE
           /opt/alphadocs/alphadocs --self-check
           mkdir -p "$RUNNER_TEMP/alphadocs-profile"
           set +e
@@ -93,6 +94,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           sudo installer -pkg releases/AlphaDocs-${{ matrix.platform }}.pkg -target /
+          cmp LICENSE /Applications/AlphaDocs.app/Contents/Resources/package/LICENSE
           /Applications/AlphaDocs.app/Contents/MacOS/alphadocs --self-check
           codesign --verify --deep --strict /Applications/AlphaDocs.app
       - uses: actions/upload-artifact@v4

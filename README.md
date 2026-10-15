@@ -7,6 +7,14 @@ Built with Rust · AI-Free editing · Offline documents
 
 ![AlphaDocs Interface](screenshots/main.png)
 
+## See it in action
+
+[![Watch the AlphaDocs promo](screenshots/promo-cover.png)](screenshots/AlphaDocs-Promo.mp4)
+
+[Watch or download the 32-second promo](screenshots/AlphaDocs-Promo.mp4) · 1080p MP4 · 2.3 MB · silent, with on-screen captions. Captured from the real native app using original example documents.
+
+Try the editable examples: [the book](examples/documents/The%20Lighthouse%20Atlas.adocs), [the illustrated guide](examples/documents/Room%20for%20your%20ideas.adocs), or [the project brief](examples/documents/Studio%20launch%20brief.adocs). Download the raw `.adocs` file, then open it in AlphaDocs.
+
 ## Download
 
 Get installers and portable builds from [GitHub Releases](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest).
@@ -26,13 +34,33 @@ The Windows installer requires .NET Framework 4.8. Downloads include the app, it
 
 Keep multiple documents open using tabs, without needing separate windows. Each document keeps its own selection, undo history and save state. Organise sections with document-content tabs in the sidebar.
 
-![Document Tabs](screenshots/tabs.png)
+![Switching between a guide, a project brief and a book](screenshots/tabs.gif)
+
+### Every chapter. One book.
+
+Give chapters their own content tabs inside a single document. Keep character notes and research alongside the story, and use the heading outline to jump to a section. The example below uses serif body text, a chapter title and a small blue running label.
+
+![Navigating three chapters of The Lighthouse Atlas](screenshots/chapters.gif)
+
+### From a first draft to a finished brief.
+
+Use your own type, colour and spacing. Add an editable table for a project plan, or combine headings, text and pictures in an illustrated guide.
+
+![A formatted project brief with milestones and a native editable table](screenshots/brief.png)
 
 ### Crop to Transparency
 
 Automatically remove invisible image borders without permanently changing the original image. Adjust crop, transparent padding, opacity, brightness and contrast, or reset the image later.
 
-![Crop to Transparency](screenshots/crop.png)
+![Removing and restoring transparent image borders](screenshots/crop.gif)
+
+### Share directly with other people.
+
+Start an encrypted sharing session and privately send an invitation with **edit** or **view** access. Work on the same document with live edits and collaborator selections, or let someone read it while you write. Each participant retains a local document copy.
+
+Sharing currently needs a reachable **LAN or VPN**, and the host must keep AlphaDocs open. It does not use hosted cloud storage, account sign-in or email delivery. [How direct sharing works](docs/COLLABORATION.md).
+
+![The native sharing and join-session interface](screenshots/sharing.gif)
 
 ### Your documents stay yours.
 
