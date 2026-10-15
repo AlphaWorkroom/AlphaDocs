@@ -1,0 +1,10 @@
+AlphaDocs by Alpha Workroom
+
+Application artwork supplied by the user:
+- alphadocs-logo.png: unchanged original uni-1.1_b_CONVERT_THIS_PNG_INT.png
+- alpha-workroom-logo.png: unchanged original Alpha Workroom Graffiti Logo.png
+
+Native icon PNG/ICO use the supplied blue book with aspect-preserving resampling and transparent square padding. Original source files are retained unchanged. The owner mark retains its original transparency, with black in Light and theme accent blue in Dark. Its original source bytes are unchanged. No third-party authorship is inferred.
+
+alphadocs-logo.png SHA-256: EBC37FE0DEAC1E7BD049B215D1263D4A8F5D435973D6ED1783D9FEB08A1EF7E9
+alpha-workroom-logo.png SHA-256: 1126475A97A196B431238A92B589BF9F3C864471576067E05FF2ADF6F4475A35

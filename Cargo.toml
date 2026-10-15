@@ -1,0 +1,66 @@
+[package]
+name = "alphadocs"
+version = "0.1.1"
+edition = "2024"
+description = "AlphaDocs by Alpha Workroom — native document editor"
+authors = ["Alpha Workroom"]
+license-file = "LICENSE"
+
+[features]
+collaboration-preview = []
+
+[dependencies]
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "persistence", "accesskit"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+unicode-segmentation = "1.12"
+yrs = { version = "=0.28.0", features = ["sync"] }
+emojis = "0.9"
+clipboard-rs = "0.3.5"
+scraper = "0.26"
+base64 = "0.22"
+ego-tree = "0.11"
+spellbook = "0.4.2"
+resvg = { version = "0.48.1", default-features = false, features = ["text", "raster-images"] }
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+
+directories = "6"
+rfd = "0.17"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+quick-xml = "0.39"
+zip = { version = "7", default-features = false, features = ["deflate"] }
+printpdf = { version = "0.12", default-features = false, features = ["png", "jpeg"] }
+harfrust = "0.12"
+open = "5"
+time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
+fontdb = { version = "0.24", default-features = false, features = ["std", "fs", "fontconfig"] }
+iroh = { version = "1.3", default-features = false, features = ["tls-ring"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+rand = { version = "0.9" }
+subtle = { version = "2" }
+semver = "1"
+
+[target.'cfg(windows)'.dependencies]
+winprint = { version = "0.2.1", default-features = false }
+windows = { version = "0.62", features = ["Data_Pdf", "Storage_Streams", "UI"] }
+winsafe = { version = "0.0.28", features = ["ole", "winspool"] }
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+
+# Debug symbols and incremental copies dominated the development directory.
+# Release binaries and user documents are independent of these caches.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
+[build-dependencies]
+winresource = "0.1.34"
+
+[patch.crates-io]
+egui-winit = { path = "vendor/egui-winit" }

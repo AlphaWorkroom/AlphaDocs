@@ -1,0 +1,171 @@
+# AlphaDocs Free Use & Non-Monetisation Licence
+
+Version 1.1
+
+Copyright (c) 2026 Alpha Workroom
+[https://github.com/AlphaWorkroom](https://github.com/AlphaWorkroom)
+
+All rights reserved except as expressly granted under this licence.
+
+Permission is hereby granted, free of charge, to any person, business or organisation obtaining a copy of AlphaDocs and its associated source code and documentation (the "Software"), to use, copy, modify, customise, fork and redistribute the Software, subject to the conditions below.
+
+For the purposes of this licence, references to the Software also include modified, forked and derivative versions containing copyright-protected portions of AlphaDocs.
+
+## 1. Permitted Use
+
+You are permitted to:
+
+- Use the Software for personal, educational, professional and commercial business activities.
+- Use the Software within companies, schools, universities, government organisations and other workplaces.
+- Create, edit and distribute documents for personal or commercial purposes.
+- Earn income from work produced using the Software, including reports, books, assignments, business documents and other original content.
+- Modify, customise and improve the source code.
+- Create and maintain your own versions of the Software.
+- Publish and share modified versions completely free of charge, subject to the distribution requirements of this licence.
+- Host free, non-monetised web-based versions of the Software.
+- Distribute the original or modified Software through GitHub in accordance with Section 3.
+
+You do not need prior permission from Alpha Workroom for these activities.
+
+**Ordinary business use is expressly permitted.** A company may use AlphaDocs to conduct its business, including revenue-generating work, provided it does not commercially exploit the Software itself as described in Section 2.
+
+Alpha Workroom makes no claim of ownership over documents, images, writing or other original content created by users through the Software.
+
+## 2. Commercial Exploitation of the Software Prohibited
+
+You may not commercially exploit, monetise or sell the Software, including modified, forked or derivative versions, without prior written permission from Alpha Workroom.
+
+Prohibited activities include, but are not limited to:
+
+- Selling, renting or charging for copies of the Software.
+- Charging users to download, install, activate or access the Software.
+- Introducing paid features, subscriptions, premium editions, paid upgrades or paid functionality into distributed versions.
+- Modifying the Software and selling the resulting application.
+- Adding cloud services or other functionality and selling, licensing or monetising the modified application.
+- Incorporating the Software into another application, software package or commercial product offered for payment.
+- Offering the Software as part of a paid software subscription, hosted service or Software-as-a-Service (SaaS) platform.
+- Generating advertising, affiliate, referral, sponsorship or similar revenue from websites or services that distribute or provide access to the Software.
+- Charging for downloads through paywalls, shortened-link services, advertisements, surveys or other monetised access mechanisms.
+- Accepting payments or donations as a condition of obtaining, accessing or using the Software.
+- Rebranding the Software and commercially distributing it under another name.
+- Using the Software itself as a paid product, paid service or commercial software offering.
+
+These restrictions apply regardless of the extent of modifications made to the original Software, provided copyright-protected portions of AlphaDocs remain incorporated.
+
+**This section does not prohibit earning income from documents or other original work created using AlphaDocs.**
+
+Commercial distribution or monetisation rights may be granted through a separate written agreement with Alpha Workroom.
+
+## 3. GitHub-Only Download Distribution
+
+All publicly distributed downloadable copies of the Software, including modified versions, must be provided exclusively through GitHub.
+
+This includes:
+
+- Source code archives and repositories.
+- Executable files and compiled applications.
+- Installers and portable versions.
+- Modified builds and forks.
+- Packaged releases and downloadable application bundles.
+
+You may distribute these files through GitHub repositories or GitHub Releases, provided they remain completely free of charge.
+
+You may link to the official or permitted GitHub downloads from external websites, social media platforms, documentation and other online resources.
+
+You may not:
+
+- Reupload or mirror downloadable copies on external websites.
+- Distribute the Software through advertising-supported download portals.
+- Host installers or application packages on third-party file-hosting services.
+- Distribute copies through commercial application stores or other platforms outside GitHub.
+- Require users to view advertisements, complete offers or visit monetised download pages to obtain the Software.
+- Place downloads behind subscriptions, payment systems or other monetised access restrictions.
+
+These restrictions apply even when the Software itself is offered without a direct purchase price.
+
+Third parties may freely link to permitted GitHub downloads, provided they do not misrepresent the Software or charge users for access to it.
+
+## 4. Free Online Applications
+
+You may host modified versions of AlphaDocs as publicly accessible web applications outside GitHub, provided that:
+
+- The application is completely free to access and use.
+- No subscriptions, paywalls, advertising or paid features are associated with access to the hosted application.
+- The hosted application is not monetised or offered as part of a paid software service.
+- Users are not required to purchase another product or service to access it.
+- Any separately downloadable copies of the Software are distributed exclusively through GitHub.
+- The copyright and attribution requirements of this licence are followed.
+
+Browser resources automatically transferred to users for the normal operation of a hosted web application are not considered downloadable distribution under Section 3.
+
+This permission does not authorise paid hosting services or commercial exploitation of AlphaDocs as a software product.
+
+## 5. Modifications and Derivative Versions
+
+You may modify, fork, extend or customise the Software for personal use, business use, experimentation or free public distribution.
+
+Modified versions may introduce additional functionality, including features not present in the original application.
+
+However:
+
+- Modified versions must not be sold or monetised without written authorisation.
+- Modified versions containing copyright-protected AlphaDocs material must remain subject to the restrictions of this licence.
+- You may not remove or bypass the applicable licence restrictions by modifying or renaming the Software.
+- You may not impose additional terms that remove the rights granted by this licence to recipients of the original Software.
+- Modified versions must clearly identify themselves as unofficial when publicly distributed.
+- Modifications must not imply that Alpha Workroom created, approved or endorsed them.
+
+The addition of new features, including AI functionality, does not grant permission to commercially exploit a modified version.
+
+## 6. Copyright, Attribution and Branding
+
+All redistributed copies and modified versions containing substantial portions of AlphaDocs must retain the following notice:
+
+Copyright (c) 2026 Alpha Workroom
+Original project: AlphaDocs
+[https://github.com/AlphaWorkroom](https://github.com/AlphaWorkroom)
+
+A complete copy of this licence must accompany all redistributed copies and modified versions.
+
+Modified versions must acknowledge AlphaDocs as the original project.
+
+The names **AlphaDocs** and **Alpha Workroom**, together with their associated logos, icons and branding, remain the property of their respective rights holders.
+
+Permission to use the Software does not automatically grant permission to use Alpha Workroom branding for independently distributed applications, except where reasonably necessary for attribution and identification of the original project.
+
+Third parties must not claim to represent Alpha Workroom or describe modified versions as official releases without written authorisation.
+
+## 7. License Conditions and Termination
+
+All permissions granted under this license are conditional upon compliance with its terms.
+
+You may not remove, bypass or replace the restrictions of this license when redistributing the Software or modified versions containing copyright-protected portions of the original.
+
+You may not grant third parties rights to AlphaDocs that exceed those granted under this license.
+
+Any violation of these conditions automatically terminates the permissions granted to the violating party.
+
+Termination does not affect the rights of other recipients who remain in compliance with this license.
+
+Alpha Workroom retains all rights not expressly granted under this license.
+
+## 8. Separate Commercial Licensing
+
+Anyone wishing to commercially distribute, monetise, repackage or sell AlphaDocs or a modified version must obtain prior written authorisation from Alpha Workroom.
+
+Alpha Workroom may grant commercial rights through separate agreements at its discretion.
+
+Nothing in this licence requires Alpha Workroom to grant such permission.
+
+## 9. Disclaimer of Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, ALPHA WORKROOM AND THE SOFTWARE'S COPYRIGHT HOLDERS SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE, MODIFICATION, OR DISTRIBUTION.
+
+---
+
+AlphaDocs Free Use & Non-Monetisation Licence
+Version 1.1
+Copyright (c) 2026 Alpha Workroom
+[https://github.com/AlphaWorkroom](https://github.com/AlphaWorkroom)

@@ -1,0 +1,119 @@
+name: Build native installers
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-release-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: Windows-x86_64
+          - os: ubuntu-22.04
+            platform: Linux-x86_64
+          - os: macos-15
+            platform: macOS-aarch64
+          - os: macos-15-intel
+            platform: macOS-x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: '3'
+      CARGO_INCREMENTAL: '0'
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: python
+        run: |
+          import os, tomllib
+          with open('Cargo.toml', 'rb') as source:
+              version = tomllib.load(source)['package']['version']
+          assert os.environ['GITHUB_REF_NAME'] == 'v' + version, 'Tag and package version differ'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libwayland-dev libdbus-1-dev libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --locked --release
+      - name: Verify native Windows executable
+        if: runner.os == 'Windows'
+        run: |
+          $p = Start-Process target/release/alphadocs.exe -ArgumentList '--self-check' -Wait -PassThru -WindowStyle Hidden
+          if ($p.ExitCode -ne 0) { throw 'Native self-check failed' }
+      - name: Verify native Unix executable
+        if: runner.os != 'Windows'
+        run: target/release/alphadocs --self-check
+      - name: Prepare licence-complete package
+        run: python scripts/prepare_dist.py
+      - name: Build Windows setup and portable ZIP
+        if: runner.os == 'Windows'
+        run: python scripts/build_windows_package.py
+      - name: Build native Unix installers
+        if: runner.os != 'Windows'
+        run: python scripts/package_unix.py
+      - name: Verify Windows installer payload without changing the runner profile
+        if: runner.os == 'Windows'
+        run: |
+          $p = Start-Process releases/AlphaDocs-Windows-x86_64-Setup.exe -ArgumentList '--verify-extract', "$env:RUNNER_TEMP/alphadocs-extraction" -Wait -PassThru -WindowStyle Hidden
+          if ($p.ExitCode -ne 0) { throw 'Installer extraction failed' }
+          if ((Get-FileHash "$env:RUNNER_TEMP/alphadocs-extraction/AlphaDocs.exe").Hash -ne (Get-FileHash dist/AlphaDocs.exe).Hash) { throw 'Installer binary mismatch' }
+      - name: Install and verify Linux DEB
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y ./releases/AlphaDocs-Linux-x86_64.deb
+          /opt/alphadocs/alphadocs --self-check
+          mkdir -p "$RUNNER_TEMP/alphadocs-profile"
+          set +e
+          ALPHADOCS_DATA_DIR="$RUNNER_TEMP/alphadocs-profile" timeout 8s xvfb-run -a /opt/alphadocs/alphadocs > "$RUNNER_TEMP/native-launch.log" 2>&1
+          result=$?
+          cat "$RUNNER_TEMP/native-launch.log"
+          test "$result" -eq 124
+      - name: Install and verify macOS PKG
+        if: runner.os == 'macOS'
+        run: |
+          sudo installer -pkg releases/AlphaDocs-${{ matrix.platform }}.pkg -target /
+          /Applications/AlphaDocs.app/Contents/MacOS/alphadocs --self-check
+          codesign --verify --deep --strict /Applications/AlphaDocs.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AlphaDocs-${{ matrix.platform }}
+          if-no-files-found: error
+          path: releases/*
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish only after every native build and installer verification succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/* --title "AlphaDocs $GITHUB_REF_NAME" --notes-file docs/RELEASE_NOTES.md --verify-tag

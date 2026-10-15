@@ -1,0 +1,8 @@
+* text=auto eol=lf
+LICENSE -text
+licenses/** -text
+assets/** -text
+**/LICENSE* -text
+*.png -text
+*.ico -text
+*.ttf -text

@@ -1,0 +1,1 @@
+Twemoji 17.0.1 artwork by Twitter, Inc. and the Twemoji contributors (https://github.com/jdecked/twemoji/tree/v17.0.1). Unmodified PNG artwork, licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). See LICENSE-GRAPHICS.
