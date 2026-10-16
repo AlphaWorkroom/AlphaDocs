@@ -9,11 +9,11 @@ Built with Rust · AI-Free editing · Offline documents
 
 ## See it in action
 
-[![Watch the AlphaDocs 10-second trailer](screenshots/trailer-preview.gif)](screenshots/AlphaDocs-Hyper-10s.mp4)
+[![Watch the AlphaDocs interaction trailer](screenshots/interaction-preview.gif)](screenshots/AlphaDocs-Interaction-10s.mp4)
 
-[Watch or download the 10-second trailer](screenshots/AlphaDocs-Hyper-10s.mp4) · 1080p / 60 fps MP4 · original music and sound design. Animated in EffectCraft using real native app captures, formatted original documents, chapter navigation, document tabs, reversible image edits and direct LAN/VPN sharing.
+[Watch the 10-second trailer with sound](screenshots/AlphaDocs-Interaction-10s.mp4) · 1080p / 60 fps MP4. Follow the cursor through real chapter tabs, open documents and direct LAN/VPN sharing, with camera close-ups, click feedback, snapping panels and original click/swish/snap sound design. The GIF above is a silent preview.
 
-The [editable EffectCraft project](promo/AlphaDocs-Hyper-10s) includes the source captures, native layers and keyframes, fonts and soundtrack.
+The [editable EffectCraft project](promo/AlphaDocs-Interaction-10s) includes the source captures, tracked vector cursor, native camera/keyframes, fonts and four separate sound stems.
 
 Try the editable examples: [the book](examples/documents/The%20Lighthouse%20Atlas.adocs), [the illustrated guide](examples/documents/Room%20for%20your%20ideas.adocs), or [the project brief](examples/documents/Studio%20launch%20brief.adocs). Download the raw `.adocs` file, then open it in AlphaDocs.
 
