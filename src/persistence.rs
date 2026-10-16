@@ -28,6 +28,7 @@ pub struct Preferences {
     pub autosave: bool,
     pub compact_menus: bool,
     pub pinned_emojis: Vec<String>,
+    pub pinned_colours: Vec<[u8; 3]>,
     pub recent_emojis: Vec<String>,
     pub personal_dictionary: Vec<String>,
     pub check_updates: bool,
@@ -51,6 +52,7 @@ impl Default for Preferences {
             autosave: true,
             compact_menus: false,
             pinned_emojis: Vec::new(),
+            pinned_colours: Vec::new(),
             recent_emojis: Vec::new(),
             personal_dictionary: Vec::new(),
             check_updates: true,
@@ -186,7 +188,21 @@ pub fn preferences() -> Preferences {
     } else {
         1.0
     };
+    prefs.pinned_colours = normalize_pinned_colours(prefs.pinned_colours);
     prefs
+}
+
+fn normalize_pinned_colours(colours: Vec<[u8; 3]>) -> Vec<[u8; 3]> {
+    let mut unique = Vec::with_capacity(colours.len().min(24));
+    for colour in colours {
+        if unique.len() == 24 {
+            break;
+        }
+        if !unique.contains(&colour) {
+            unique.push(colour);
+        }
+    }
+    unique
 }
 pub fn save_preferences(prefs: &Preferences) -> Result<(), String> {
     atomic_write(
@@ -277,6 +293,21 @@ pub fn history(doc: &Document) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use crate::model::*;
+    #[test]
+    fn saved_pinned_colours_are_deduplicated_and_limited() {
+        let mut colours: Vec<_> = (0..30).map(|i| [i, 1, 2]).collect();
+        colours.insert(2, [0, 1, 2]);
+        let normalized = normalize_pinned_colours(colours);
+        assert_eq!(normalized.len(), 24);
+        assert_eq!(normalized[0], [0, 1, 2]);
+        assert_eq!(
+            normalized
+                .iter()
+                .filter(|colour| **colour == [0, 1, 2])
+                .count(),
+            1
+        );
+    }
     #[test]
     fn document_ids_cannot_escape_library_directory() {
         let mut d = Document::new("Invalid");

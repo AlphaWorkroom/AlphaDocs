@@ -15,6 +15,8 @@ pub mod persistence;
 pub mod printing;
 pub mod proofing;
 pub mod session;
+pub mod signing;
+pub mod speech;
 pub mod ui;
 pub mod updater;
 pub mod updates;

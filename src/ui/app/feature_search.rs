@@ -49,8 +49,13 @@ fn commands() -> Vec<(&'static str, &'static str, Command)> {
         ),
         (
             "Voice typing",
-            "Tools · System dictation guidance",
+            "Tools · Offline microphone dictation",
             A(Action::Tool(tools::Tool::Voice)),
+        ),
+        (
+            "eSignature",
+            "Tools · Local signing requests and responses",
+            A(Action::Tool(tools::Tool::Signing)),
         ),
         (
             "Accessibility",
@@ -235,7 +240,7 @@ impl AlphaDocs {
             _ if self.home => false,
             Command::Action(Action::Comment | Action::Reaction) => {
                 !self.session.viewing
-                    && (self.image_block.is_some() || self.session.editor.selected())
+                    && (self.image_block.is_some() || self.session.editor.has_scalar_selection())
             }
             Command::Action(Action::Undo) => {
                 !self.session.viewing && self.session.editor.can_undo()

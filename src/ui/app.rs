@@ -1,5 +1,9 @@
 mod about;
+#[cfg(test)]
+mod checklist_tests;
+mod checklists;
 mod chrome;
+mod colours;
 mod comments;
 mod dialogs;
 mod document_tabs;
@@ -22,12 +26,14 @@ mod preferences;
 mod print_screen;
 mod proofing;
 mod sharing;
+mod signing_screen;
 mod table_controls;
 mod toolbar_chrome;
 mod tools;
 #[cfg(test)]
 mod tools_tests;
 mod updating;
+mod voice;
 use crate::{
     compat,
     engine::ClipboardContent,
@@ -66,6 +72,7 @@ enum Dialog {
     About,
     Symbols,
     Emojis,
+    ColourPicker,
     Print,
     Share,
     Delete,
@@ -183,6 +190,7 @@ pub struct AlphaDocs {
     fonts_checked: Option<(String, u64, String, bool, bool)>,
     content_cache: DocumentContentCache,
     emoji_picker: emoji_picker::EmojiPicker,
+    colour_picker: Option<colours::PickerState>,
     table_drag: Option<table_controls::TableDrag>,
     context_pointer: super::platform::ContextPointer,
     tab_rename: Option<(String, String)>,
@@ -204,6 +212,8 @@ pub struct AlphaDocs {
     sharing: sharing::ShareState,
     update_state: updating::UpdateState,
     tools: tools::Tools,
+    signing: signing_screen::SigningUi,
+    voice: voice::VoiceUi,
     #[cfg(test)]
     autosave_test_now: Option<Instant>,
     #[cfg(test)]
@@ -328,6 +338,7 @@ impl AlphaDocs {
             fonts_checked: None,
             content_cache: DocumentContentCache::default(),
             emoji_picker: emoji_picker::EmojiPicker::default(),
+            colour_picker: None,
             table_drag: None,
             context_pointer: Default::default(),
             tab_rename: None,
@@ -348,6 +359,8 @@ impl AlphaDocs {
             sharing: sharing::ShareState::default(),
             update_state: Default::default(),
             tools: Default::default(),
+            signing: Default::default(),
+            voice: Default::default(),
             #[cfg(test)]
             autosave_test_now: None,
             #[cfg(test)]
@@ -960,7 +973,7 @@ impl AlphaDocs {
                 {
                     self.emoji_reaction_target = Some(i.id.clone());
                     self.dialog = Some(Dialog::Emojis);
-                } else if self.session.editor.selected() {
+                } else if self.session.editor.has_scalar_selection() {
                     self.text_reaction_range =
                         Some((self.session.editor.range(), self.session.editor.revision));
                     self.emoji_reaction_target = None;
@@ -1237,7 +1250,7 @@ impl AlphaDocs {
                         ui,
                         "Comment",
                         "Ctrl+Alt+M",
-                        self.image_block.is_some() || self.session.editor.selected(),
+                        self.image_block.is_some() || self.session.editor.has_scalar_selection(),
                     ) {
                         self.queue(Action::Comment);
                     }
@@ -1245,7 +1258,7 @@ impl AlphaDocs {
                         ui,
                         "Emoji reaction",
                         "",
-                        self.image_block.is_some() || self.session.editor.selected(),
+                        self.image_block.is_some() || self.session.editor.has_scalar_selection(),
                     ) {
                         self.queue(Action::Reaction);
                     }
@@ -1821,11 +1834,27 @@ impl AlphaDocs {
                     Icon::Comment,
                     "Add comment (Ctrl+Alt+M)",
                     false,
-                    app.session.editor.selected(),
+                    app.session.editor.has_scalar_selection(),
                 )
                 .clicked()
                 {
                     app.queue(Action::Comment);
+                }
+                let checklist = icons::button(
+                    ui,
+                    Icon::Checkbox,
+                    "Checklist",
+                    app.session
+                        .editor
+                        .doc
+                        .paragraph(app.session.editor.caret.address)
+                        .is_some_and(|p| p.list == ListKind::Check),
+                    !app.session.viewing,
+                );
+                tools::bounds(ui, "checklist_toolbar", &checklist);
+                if checklist.clicked() {
+                    app.session.editor.toggle_checklist_for_selection();
+                    app.refocus = true;
                 }
                 ui.separator();
                 icon_menu(ui, Icon::AlignLeft, "Alignment", |ui| app.alignments(ui));
@@ -1833,7 +1862,6 @@ impl AlphaDocs {
                     app.spacing(ui)
                 });
                 for (icon, label, kind) in [
-                    (Icon::Check, "Checklist", ListKind::Check),
                     (Icon::Bullet, "Bulleted list", ListKind::Bullet),
                     (Icon::Number, "Numbered list", ListKind::Number),
                 ] {
@@ -1859,75 +1887,6 @@ impl AlphaDocs {
                 }
             });
         });
-    }
-    fn colours(&mut self, ui: &mut Ui, highlight: bool) {
-        ui.label(if highlight {
-            "Highlight colour"
-        } else {
-            "Text colour"
-        });
-        let colours: [[u8; 3]; 24] = [
-            [31, 31, 31],
-            [95, 99, 104],
-            [150, 150, 150],
-            [210, 210, 210],
-            [240, 240, 240],
-            [255, 255, 255],
-            [183, 28, 28],
-            [230, 81, 0],
-            [245, 180, 0],
-            [56, 142, 60],
-            [0, 137, 123],
-            [11, 87, 208],
-            [123, 31, 162],
-            [194, 24, 91],
-            [239, 154, 154],
-            [255, 204, 128],
-            [255, 245, 157],
-            [165, 214, 167],
-            [128, 203, 196],
-            [144, 202, 249],
-            [206, 147, 216],
-            [244, 143, 177],
-            [211, 227, 253],
-            [232, 240, 254],
-        ];
-        egui::Grid::new(if highlight {
-            "highlight_palette"
-        } else {
-            "text_palette"
-        })
-        .spacing(vec2(4.0, 4.0))
-        .show(ui, |ui| {
-            for (i, c) in colours.iter().enumerate() {
-                if ui
-                    .add(
-                        egui::Button::new("")
-                            .fill(layout::color(*c))
-                            .min_size(vec2(26.0, 26.0)),
-                    )
-                    .clicked()
-                {
-                    self.session.editor.format(|s| {
-                        if highlight {
-                            s.highlight = Some(*c);
-                        } else {
-                            s.color = *c;
-                        }
-                    });
-                    self.refocus = true;
-                    ui.close();
-                }
-                if (i + 1) % 6 == 0 {
-                    ui.end_row();
-                }
-            }
-        });
-        if highlight && ui.button("None").clicked() {
-            self.session.editor.format(|s| s.highlight = None);
-            self.refocus = true;
-            ui.close();
-        }
     }
 }
 
@@ -2121,7 +2080,7 @@ impl AlphaDocs {
                 self.comment_cards(ui);
             });
     }
-    fn canvas(&mut self, ui: &mut Ui) {
+    fn canvas(&mut self, ui: &mut Ui) -> Id {
         self.feature_destination(feature_search::Target::Canvas, ui.max_rect());
         let p = self.palette;
         let ctx = ui.ctx().clone();
@@ -2150,6 +2109,12 @@ impl AlphaDocs {
         let mut image_context = None;
         let mut margin_change = None;
         let mut check_change = None;
+        let selected_cells: std::collections::HashSet<_> = self
+            .session
+            .editor
+            .selected_table_cell_addresses()
+            .into_iter()
+            .collect();
         let mut table_move = None;
         let mut annotation_clicked = None;
         self.annotation_positions.clear();
@@ -2158,6 +2123,7 @@ impl AlphaDocs {
             && (self.comments_open || comments::has_annotations(&self.session.editor.doc));
         let rail_width = if show_annotations { 440.0 } else { 0.0 };
         let salt = ("pages", &self.session.editor.doc.id);
+        let scroll_id = ui.make_persistent_id(egui::IdSalt::new(salt));
         let mut scroll = egui::ScrollArea::both()
             .id_salt(salt)
             .auto_shrink([false, false]);
@@ -2165,8 +2131,8 @@ impl AlphaDocs {
         if self.scroll_caret
             && let Some(line) = l.caret_line(self.session.editor.caret)
         {
-            let offset = egui::scroll_area::State::load(&ctx, ui.make_persistent_id(salt))
-                .map_or(0.0, |s| s.offset.y);
+            let offset =
+                egui::scroll_area::State::load(&ctx, scroll_id).map_or(0.0, |s| s.offset.y);
             let top = ruler + 12.0 + line.page as f32 * (h + gap) + line.rect.top() * scale;
             let bottom = top + line.rect.height() * scale;
             let viewport = ui.available_height();
@@ -2180,7 +2146,7 @@ impl AlphaDocs {
                 jumped = true;
             }
         }
-        scroll.show(ui, |ui| {
+        let scroll_output = scroll.show(ui, |ui| {
             let size = vec2(
                 (w + 48.0 + rail_width).max(ui.available_width()),
                 (h + gap) * l.pages as f32 + 32.0 + ruler,
@@ -2523,7 +2489,21 @@ impl AlphaDocs {
                                 ));
                             }
                         }
-                        Object::Border { page: pn, rect, .. } if *pn == page => {
+                        Object::Border {
+                            page: pn,
+                            rect,
+                            address,
+                        } if *pn == page => {
+                            if selected_cells.contains(address) {
+                                ui.painter().rect_filled(
+                                    Rect::from_min_size(
+                                        o + rect.min.to_vec2() * scale,
+                                        rect.size() * scale,
+                                    ),
+                                    0.0,
+                                    p.selection,
+                                );
+                            }
                             ui.painter().rect_stroke(
                                 Rect::from_min_size(
                                     o + rect.min.to_vec2() * scale,
@@ -2624,7 +2604,7 @@ impl AlphaDocs {
                             }
                         }
                     }
-                    if self.session.editor.selected()
+                    if self.session.editor.has_scalar_selection()
                         && line.address >= s.address
                         && line.address <= e.address
                     {
@@ -2677,30 +2657,44 @@ impl AlphaDocs {
                         pos,
                         rect.height(),
                     );
-                    ui.painter().galley(pos, display.clone(), p.text);
+                    let completed =
+                        self.session
+                            .editor
+                            .doc
+                            .paragraph(line.address)
+                            .is_some_and(|paragraph| {
+                                paragraph.list == ListKind::Check && paragraph.checked
+                            });
+                    let mut text_painter = ui.painter().clone();
+                    if completed {
+                        text_painter.multiply_opacity(0.60);
+                    }
+                    text_painter.galley(pos, display.clone(), p.text);
                     live_proofing::paint(ui, &live_issues, line, &display, pos, rect.height());
                     if let Some(marker) = &line.marker {
-                        ui.painter().text(
-                            pos - vec2(18.0 * scale, 0.0),
-                            Align2::LEFT_TOP,
-                            marker,
-                            FontId::proportional(11.0 * scale),
-                            p.text,
-                        );
-                        if (marker == "☐" || marker == "☑")
-                            && !self.session.viewing
-                            && ui
-                                .interact(
-                                    Rect::from_min_size(
-                                        pos - vec2(20.0 * scale, 0.0),
-                                        vec2(18.0 * scale, rect.height()),
-                                    ),
-                                    Id::new(("check", line.address)),
-                                    Sense::click(),
-                                )
-                                .clicked()
-                        {
-                            check_change = Some(line.address);
+                        if marker == "☐" || marker == "☑" {
+                            if checklists::checkbox(
+                                ui,
+                                line.address,
+                                pos,
+                                rect.height(),
+                                scale,
+                                marker == "☑",
+                                !self.session.viewing,
+                                p,
+                            )
+                            .clicked()
+                            {
+                                check_change = Some(line.address);
+                            }
+                        } else {
+                            ui.painter().text(
+                                pos - vec2(18.0 * scale, 0.0),
+                                Align2::LEFT_TOP,
+                                marker,
+                                FontId::proportional(11.0 * scale),
+                                p.text,
+                            );
                         }
                     }
                     if self.nonprinting
@@ -2723,6 +2717,7 @@ impl AlphaDocs {
                         );
                     }
                     if self.image_block.is_none()
+                        && self.session.editor.table_selection().is_none()
                         && line.address == self.session.editor.caret.address
                         && self.session.editor.caret.offset >= line.start
                         && self.session.editor.caret.offset <= line.end
@@ -2857,17 +2852,37 @@ impl AlphaDocs {
                 &mut self.image_drag,
                 self.session.viewing,
             );
-            let text_press = pointer_gesture::pressed_in(ui, response.rect).filter(|pointer| {
-                image_move::hit_image(
-                    l,
-                    &self.session.editor.doc,
-                    &origin,
-                    scale,
-                    *pointer,
-                    ui.input(|i| i.modifiers.alt),
-                )
-                .is_none()
-            });
+            let checkbox_pointer = ctx
+                .input(|i| {
+                    i.pointer
+                        .press_origin()
+                        .or_else(|| i.pointer.interact_pos())
+                })
+                .is_some_and(|pointer| checklists::hit(l, &origin, scale, pointer));
+            let text_press = pointer_gesture::pressed_in(ui, response.rect)
+                .filter(|pointer| !checklists::hit(l, &origin, scale, *pointer))
+                .filter(|pointer| {
+                    // ScrollArea registers its scrollbar widgets after invoking
+                    // this closure. The raw press fallback below can otherwise
+                    // claim the pointer before the scrollbar gets its drag.
+                    ![scroll_id.with(0usize), scroll_id.with(1usize)]
+                        .into_iter()
+                        .any(|id| {
+                            ctx.read_response(id)
+                                .is_some_and(|bar| bar.rect.contains(*pointer))
+                        })
+                })
+                .filter(|pointer| {
+                    image_move::hit_image(
+                        l,
+                        &self.session.editor.doc,
+                        &origin,
+                        scale,
+                        *pointer,
+                        ui.input(|i| i.modifiers.alt),
+                    )
+                    .is_none()
+                });
             if (response.clicked()
                 || response.drag_started()
                 || response.dragged()
@@ -2878,6 +2893,7 @@ impl AlphaDocs {
                 && image_move.is_none()
                 && self.table_drag.is_none()
                 && table_move.is_none()
+                && !checkbox_pointer
                 && let Some(pointer) = text_press.or_else(|| response.interact_pointer_pos())
             {
                 let page = (((pointer.y - start_y) / (h + gap)).floor().max(0.0) as usize)
@@ -2985,6 +3001,18 @@ impl AlphaDocs {
                     self.action = Some(Action::Paste);
                 }
                 ui.separator();
+                if menu(ui, "Turn into checklist", "", !self.session.viewing) {
+                    self.session.editor.set_checklist_for_selection();
+                    self.refocus = true;
+                }
+                if menu(ui, "Remove checklist", "", !self.session.viewing) {
+                    self.session.editor.paragraph_format(|p| {
+                        p.list = ListKind::None;
+                        p.checked = false;
+                    });
+                    self.refocus = true;
+                }
+                ui.separator();
                 if menu(ui, "Insert link", "Ctrl+K", !self.session.viewing) {
                     self.action = Some(Action::Link);
                 }
@@ -3006,7 +3034,7 @@ impl AlphaDocs {
                     || url.starts_with("mailto:"))
             {
                 ctx.open_url(egui::OpenUrl::new_tab(url));
-                return;
+                return scroll_output.id;
             }
             let text = para.text();
             let byte = text
@@ -3092,11 +3120,7 @@ impl AlphaDocs {
             ctx.request_repaint();
         }
         if let Some(address) = check_change {
-            self.session.editor.transaction(|e| {
-                if let Some(p) = e.doc.paragraph_mut(address) {
-                    p.checked = !p.checked;
-                }
-            });
+            self.session.editor.toggle_check_checked(address);
         }
         if let Some(thread) = annotation_clicked {
             self.active_comment = Some(thread);
@@ -3149,6 +3173,7 @@ impl AlphaDocs {
                 ctx.request_repaint();
             }
         }
+        scroll_output.id
     }
 }
 
@@ -3261,7 +3286,13 @@ fn template(kind: usize) -> Document {
 
 impl AlphaDocs {
     fn update_ui(&mut self, ui: &mut Ui) {
+        if self.signing.open {
+            self.voice.cancel();
+            self.signing_screen(ui);
+            return;
+        }
         if self.update_state.busy() {
+            self.voice.cancel();
             self.poll_sharing(ui.ctx());
             self.poll_updates(ui.ctx());
             self.updating_screen(ui);
@@ -3274,6 +3305,7 @@ impl AlphaDocs {
         // Collaboration projection is remote work. Track only later revisions as
         // local edits so remote changes stay recoverable without moving the idle timer.
         let revision_before_local_ui = self.autosave_revision();
+        self.poll_voice(ui.ctx());
         self.poll_paste(ui.ctx());
         let ctx = ui.ctx().clone();
         if ctx.os() == egui::os::OperatingSystem::Mac
@@ -3368,6 +3400,7 @@ impl AlphaDocs {
         self.nearby_prompt(&ctx);
         self.feature_search(&ctx);
         self.updates_ui(&ctx);
+        self.voice_window(&ctx);
         if let Some(a) = self.action.take() {
             self.execute(a, &ctx);
         }
@@ -3474,6 +3507,15 @@ fn truncate(t: &str, n: usize) -> String {
 }
 fn table_commands(ui: &mut Ui, editor: &mut crate::engine::Editor, viewing: bool) -> bool {
     let mut changed = false;
+    let address = editor.caret.address;
+    let table = matches!(editor.doc.blocks.get(address.block), Some(Block::Table(_)));
+    if menu(ui, "Select row", "", table) {
+        changed |= editor.select_table_row(address.block, address.row);
+    }
+    if menu(ui, "Select column", "", table) {
+        changed |= editor.select_table_column(address.block, address.cell);
+    }
+    ui.separator();
     for (label, operation) in [
         ("Insert row above", 0),
         ("Insert row below", 1),
@@ -3540,7 +3582,7 @@ fn menu_width(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool, width: f3
         Some(Icon::Bell)
     } else if label.starts_with("Review suggested") {
         Some(Icon::Suggest)
-    } else if label == "eSignature" {
+    } else if label.starts_with("eSignature") {
         Some(Icon::Edit)
     } else if label.contains("(.") {
         Some(Icon::Document)

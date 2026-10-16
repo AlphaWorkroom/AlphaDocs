@@ -51,11 +51,17 @@ jobs:
           cache-on-failure: true
       - name: Linux native dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libdbus-1-dev libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libdbus-1-dev libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libasound2-dev xvfb
+      - name: Prepare pinned Vosk runtime for optional speech worker
+        run: python scripts/prepare_speech.py --prepare-native
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
-      - run: cargo test --locked
+      - run: cargo test --locked --all-features
       - run: cargo build --locked --release
+      - name: Build optional offline speech sidecar
+        run: cargo build --locked --release --features speech-worker --bin alphadocs-speech
+      - name: Verify explicit speech setup and offline PCM decoding without microphone access
+        run: python scripts/verify_speech.py
       - name: Verify native Windows executable
         if: runner.os == 'Windows'
         run: |
@@ -66,6 +72,8 @@ jobs:
         run: target/release/alphadocs --self-check
       - name: Prepare licence-complete package
         run: python scripts/prepare_dist.py
+      - name: Add speech sidecar and native runtime to the verified package
+        run: python scripts/prepare_speech.py --stage
       - name: Build Windows setup and portable ZIP
         if: runner.os == 'Windows'
         run: python scripts/build_windows_package.py

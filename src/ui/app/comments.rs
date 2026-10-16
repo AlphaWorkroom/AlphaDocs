@@ -56,7 +56,7 @@ impl AlphaDocs {
             return;
         }
         if self.image_block.is_none() {
-            if !self.session.editor.selected() {
+            if !self.session.editor.has_scalar_selection() {
                 return;
             }
             self.text_comment_range =
@@ -391,7 +391,7 @@ impl AlphaDocs {
             });
         }
         if self.image_block.is_none()
-            && self.session.editor.selected()
+            && self.session.editor.has_scalar_selection()
             && !self.comments_open
             && !self.session.viewing
             && let Some(rect) = self.selection_annotation_rect

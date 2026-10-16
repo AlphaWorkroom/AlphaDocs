@@ -74,6 +74,9 @@ Write and edit completely offline, without relying on cloud services, an account
 ### Familiar tools, native performance.
 
 - Measured pages with 11 paper presets, custom dimensions and pageless view; headings, lists, links, editable tables and find/replace.
+- Interactive checklists, whole table-row/column selection, custom colour wheel and pinned palettes.
+- Local signature requests with typed/drawn signatures, returned response files and completed PDFs. [Signing workflow](docs/SIGNING.md).
+- Built-in offline English voice typing after explicit first-use runtime/model setup. [Speech details](docs/SPEECH_BACKEND.md).
 - Manual citations and bibliographies, text comparison reports, measured line numbers and optional typing substitutions.
 - Offline Australian English spelling and basic grammar checks, with squiggles and right-click suggestions.
 - Reversible image editing, wrap/behind/front placement and measured alignment guides.
@@ -85,7 +88,7 @@ Write and edit completely offline, without relying on cloud services, an account
 
 [Full changelog](CHANGELOG.md) · [Writing tools and online-service limits](docs/WRITING_TOOLS.md).
 
-Document editing needs no connection. Public GitHub update checks are enabled by default, run at most once a day and can be disabled in Preferences. **Help → Check for updates** checks manually. Update checks request release metadata only. Online dictionary lookup sends just the searched word; document translation is hidden unless enabled in Preferences and sends text only when you click Translate. From 0.1.3 onward, Download and install shows byte progress while downloading, saves open work, verifies the installer and restarts the updated app. Windows keeps a helper window visible during installation; macOS and Linux close AlphaDocs while a background helper installs, then reopen it (the OS may show an authorization prompt). Unsupported portable locations show a manual-download route. Older versions need this installer once to gain the new updater. See [update and recovery details](docs/UPDATES.md).
+Document editing needs no connection. Public GitHub update checks are enabled by default, run at most once a day and can be disabled in Preferences. **Help → Check for updates** checks manually. Update checks request release metadata only. Voice typing downloads its runtime and English model once (about 46–55 MB), then recognises speech locally without uploading audio or document text. Online dictionary lookup sends just the searched word; document translation is hidden unless enabled in Preferences and sends text only when you click Translate. From 0.1.3 onward, Download and install shows byte progress while downloading, saves open work, verifies the installer and restarts the updated app. Windows keeps a helper window visible during installation; macOS and Linux close AlphaDocs while a background helper installs, then reopen it (the OS may show an authorization prompt). Unsupported portable locations show a manual-download route. Older versions need this installer once to gain the new updater. See [update and recovery details](docs/UPDATES.md).
 
 ## Compatibility
 

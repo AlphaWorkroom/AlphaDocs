@@ -28,6 +28,7 @@ pub enum Icon {
     Bullet,
     Number,
     Check,
+    Checkbox,
     Resolve,
     Indent,
     Outdent,
@@ -68,6 +69,16 @@ pub fn draw(ui: &Ui, rect: Rect, icon: Icon, color: Color32) {
         p.line_segment([a, b], s);
     };
     match icon {
+        Icon::Checkbox => {
+            p.rect_stroke(
+                Rect::from_min_max(xy(2.0, 2.0), xy(16.0, 16.0)),
+                2.0,
+                s,
+                egui::StrokeKind::Inside,
+            );
+            line(xy(5.0, 9.0), xy(8.0, 12.0));
+            line(xy(8.0, 12.0), xy(13.0, 6.0));
+        }
         Icon::Citations => {
             for x in [2.0, 10.0] {
                 p.rect_stroke(

@@ -1955,6 +1955,125 @@ fn mouse_clicks_select_empty_cells_and_context_click_targets_the_clicked_row() {
 }
 
 #[test]
+fn canvas_scrollbar_drag_keeps_pointer_ownership_from_press_through_release() {
+    let (ctx, mut app) = editor();
+    app.prefs.outline = false;
+    app.prefs.ruler = false;
+    app.session.editor.doc.blocks = (0..120)
+        .map(|i| {
+            Block::Paragraph(Paragraph::from_text(&format!(
+                "Paragraph {i}: {}",
+                "long document text ".repeat(24)
+            )))
+        })
+        .collect();
+    let scroll_id = std::cell::Cell::new(None);
+    let frame = |app: &mut AlphaDocs, events| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                app.input(&ctx);
+                egui::CentralPanel::default().show(ui, |ui| {
+                    app.ensure_layout(&ctx);
+                    scroll_id.set(Some(app.canvas(ui)));
+                });
+            },
+        );
+        output.textures_delta.clear();
+    };
+
+    frame(&mut app, vec![]);
+    frame(&mut app, vec![]);
+    let scroll_id = scroll_id.get().unwrap();
+    let scrollbar = ctx
+        .read_response(scroll_id.with(1usize))
+        .expect("vertical scrollbar response");
+    let start = pos2(scrollbar.rect.center().x, scrollbar.rect.top() + 8.0);
+    let end = pos2(scrollbar.rect.center().x, scrollbar.rect.bottom() - 8.0);
+    let initial = egui::scroll_area::State::load(&ctx, scroll_id)
+        .unwrap()
+        .offset
+        .y;
+    // The press and movement can be coalesced into one egui frame; releasing
+    // in the next frame must leave ScrollArea with the final offset.
+    frame(
+        &mut app,
+        vec![
+            Event::PointerMoved(start),
+            pointer(start, egui::PointerButton::Primary, true),
+            Event::PointerMoved(end),
+        ],
+    );
+    let moved = egui::scroll_area::State::load(&ctx, scroll_id)
+        .unwrap()
+        .offset
+        .y;
+    assert!(
+        moved > initial,
+        "dragging the native scrollbar must scroll the canvas"
+    );
+    frame(
+        &mut app,
+        vec![pointer(end, egui::PointerButton::Primary, false)],
+    );
+    let released = egui::scroll_area::State::load(&ctx, scroll_id)
+        .unwrap()
+        .offset
+        .y;
+    assert!(
+        released > initial,
+        "release must preserve the scrollbar's final offset"
+    );
+}
+
+#[test]
+fn canvas_text_selection_drag_still_uses_the_editor_pointer_owner() {
+    let (ctx, mut app) = editor();
+    app.prefs.outline = false;
+    app.prefs.ruler = false;
+    app.session.editor.insert("Select this text with the mouse");
+    image_frame(&ctx, &mut app, vec![]);
+    image_frame(&ctx, &mut app, vec![]);
+    let area = ctx.read_response(Id::new("document_canvas")).unwrap().rect;
+    let layout = app.layout.as_ref().unwrap();
+    let scale = 4.0 / 3.0 * app.prefs.zoom;
+    let left = (area.left() + (area.width() - layout.size.x * scale) * 0.5).max(area.left() + 24.0);
+    let line = layout.lines.first().unwrap();
+    let origin_y = area.top() + 12.0;
+    let start = pos2(
+        left + (line.rect.left() + 2.0) * scale,
+        origin_y + line.rect.center().y * scale,
+    );
+    let end = start + vec2(92.0, 0.0);
+    image_frame(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(start),
+            pointer(start, egui::PointerButton::Primary, true),
+        ],
+    );
+    image_frame(&ctx, &mut app, vec![Event::PointerMoved(end)]);
+    image_frame(
+        &ctx,
+        &mut app,
+        vec![pointer(end, egui::PointerButton::Primary, false)],
+    );
+    assert!(app.session.editor.selected());
+    assert!(
+        app.session
+            .editor
+            .copy_fragment()
+            .text
+            .starts_with("Select")
+    );
+}
+
+#[test]
 fn mixed_native_paste_completion_replaces_select_all_and_rejects_stale_selection() {
     for stale in [false, true] {
         let (ctx, mut app) = editor();

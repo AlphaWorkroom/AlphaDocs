@@ -66,7 +66,7 @@ impl AlphaDocs {
         // currently owns toolkit focus. Sidebar/title text fields returned above.
         let canvas_focused = canvas_focused || self.image_block.is_some();
         if !self.session.viewing
-            && (self.image_block.is_some() || self.session.editor.selected())
+            && (self.image_block.is_some() || self.session.editor.has_scalar_selection())
             && ctx.input_mut(|i| {
                 i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::ALT, Key::M)
             })

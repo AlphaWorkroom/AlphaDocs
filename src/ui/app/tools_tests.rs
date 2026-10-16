@@ -150,7 +150,7 @@ fn translation_stays_hidden_in_tools_and_feature_search_when_disabled() {
 
 #[test]
 fn disabled_tools_rows_keep_the_popup_open_and_do_not_dispatch_actions() {
-    for label in ["Review suggested edits", "eSignature", "Linked objects"] {
+    for label in ["Review suggested edits", "Linked objects"] {
         let (ctx, mut app) = editor();
         settle(&ctx, &mut app);
         click_id(&ctx, &mut app, "tools_menu");
@@ -185,6 +185,40 @@ fn disabled_tools_rows_keep_the_popup_open_and_do_not_dispatch_actions() {
         assert!(app.dialog.is_none());
         assert!(app.action.is_none());
     }
+}
+
+#[test]
+fn esignature_tools_row_opens_the_native_signing_workspace() {
+    let (ctx, mut app) = editor();
+    settle(&ctx, &mut app);
+    click_id(&ctx, &mut app, "tools_menu");
+    settle(&ctx, &mut app);
+    let row = ctx
+        .data_mut(|data| data.get_temp::<Rect>(Id::new(("menu_bounds", "eSignature…"))))
+        .expect("eSignature Tools row bounds");
+    frame(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(row.center()),
+            Event::PointerButton {
+                pos: row.center(),
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            Event::PointerButton {
+                pos: row.center(),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    assert!(app.signing.open);
+    assert!(app.dialog.is_none());
+    frame(&ctx, &mut app, vec![]);
+    assert!(app.signing.open);
 }
 
 #[test]

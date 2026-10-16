@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.4 — 17 October 2026 (in development)
+
+- Fixed native scrollbar pointer ownership so dragging the thumb does not become a document selection. Mouse-wheel scrolling and outline navigation retain their measured scroll geometry.
+- Dictionary searches fall back to English Wiktionary when Free Dictionary API is unavailable. Results identify their source and licence; only the explicitly searched word is sent.
+- Text and highlight palettes now include a native hue/saturation wheel, brightness rail, HEX/RGB inputs and up to 24 pinned colours shared between both palettes. Applying a colour is undoable; pinning does not edit the document.
+- Table context menus select a complete row or column. Copy retains editable cells, formatting applies across the selection, and Delete/Backspace clears its contents in one undoable edit.
+- Added a checklist button immediately beside Add comment and a text context-menu action. Selected paragraphs and explicit body-text line breaks become independent checkable items; completed text is dimmed in light and dark themes without changing its stored colour.
+- Added local eSignature request and response files. Requests freeze every document tab, assign named fields, accept typed/drawn signatures or a decline, validate returned responses against the original request manifest, and export a completed PDF with a separate signing section and local audit record. Names are self-declared; no hosted delivery or certificate-backed identity verification is provided.
+- Added built-in offline English microphone dictation with Start/Stop, input level, partial preview and undoable final insertion. First-use setup downloads the pinned upstream recognition runtime and model separately (about 46–55 MB, depending on platform); no microphone audio or document text is uploaded. Physical microphone checks remain human verification.
+
 ## 0.1.3 — 16 October 2026
 
 ### Focused fixes

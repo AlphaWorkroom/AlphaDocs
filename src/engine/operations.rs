@@ -400,6 +400,40 @@ impl Editor {
         self.sync_style();
     }
     pub fn copy_fragment(&self) -> ClipboardContent {
+        if let Some(selection) = self.table_selection() {
+            let table = match selection {
+                super::TableSelection::Row { block, row } => {
+                    let Some(Block::Table(rows)) = self.doc.blocks.get(block) else {
+                        return ClipboardContent {
+                            text: String::new(),
+                            blocks: vec![],
+                        };
+                    };
+                    let Some(cells) = rows.get(row) else {
+                        return ClipboardContent {
+                            text: String::new(),
+                            blocks: vec![],
+                        };
+                    };
+                    vec![cells.clone()]
+                }
+                super::TableSelection::Column { block, column } => {
+                    let Some(Block::Table(rows)) = self.doc.blocks.get(block) else {
+                        return ClipboardContent {
+                            text: String::new(),
+                            blocks: vec![],
+                        };
+                    };
+                    rows.iter()
+                        .map(|row| vec![row.get(column).cloned().unwrap_or_default()])
+                        .collect()
+                }
+            };
+            return ClipboardContent {
+                text: self.selected_table_text().unwrap_or_default(),
+                blocks: vec![Block::Table(table)],
+            };
+        }
         let (start, end) = self.range();
         let mut blocks = vec![];
         let addresses = self.doc.addresses();
@@ -473,6 +507,49 @@ impl Editor {
             return;
         }
         if image.is_some_and(|block| !matches!(self.doc.blocks.get(block), Some(Block::Image(_)))) {
+            return;
+        }
+        if image.is_none() && self.table_selection().is_some() {
+            let mut chars = Vec::new();
+            let mut has_content = false;
+            for block in &fragment.blocks {
+                match block {
+                    Block::Paragraph(paragraph) => {
+                        if has_content {
+                            chars.push(StyledChar {
+                                ch: '\n',
+                                style: self.typing.clone(),
+                            });
+                        }
+                        chars.extend(paragraph.chars.iter().cloned());
+                        has_content = true;
+                    }
+                    Block::Table(rows) => {
+                        for (row_index, row) in rows.iter().enumerate() {
+                            if has_content || row_index > 0 {
+                                chars.push(StyledChar {
+                                    ch: '\n',
+                                    style: self.typing.clone(),
+                                });
+                            }
+                            for (cell_index, cell) in row.iter().enumerate() {
+                                if cell_index > 0 {
+                                    chars.push(StyledChar {
+                                        ch: '\t',
+                                        style: self.typing.clone(),
+                                    });
+                                }
+                                chars.extend(cell.chars.iter().cloned());
+                            }
+                            has_content = true;
+                        }
+                    }
+                    Block::Image(_) | Block::PageBreak | Block::Rule => {}
+                }
+            }
+            if !chars.is_empty() {
+                self.insert_rich(vec![chars]);
+            }
             return;
         }
         // Table cells accept rich text as line-separated paragraphs. Outer tables and images

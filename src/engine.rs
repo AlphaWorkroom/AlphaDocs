@@ -21,6 +21,17 @@ struct Snapshot {
     caret: Position,
     anchor: Position,
 }
+
+/// A transient selection of a table's complete row or column.
+///
+/// This is separate from the scalar text selection held by `Editor::caret` and
+/// `Editor::anchor`, so selecting cells does not change text-editing semantics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TableSelection {
+    Row { block: usize, row: usize },
+    Column { block: usize, column: usize },
+}
+
 impl Snapshot {
     fn between(before: &Document, after: &Document, caret: Position, anchor: Position) -> Self {
         let mut start = 0;
@@ -67,6 +78,7 @@ pub struct Editor {
     pub rich_clipboard: Option<(String, Vec<Vec<StyledChar>>)>,
     last_insert: Option<(Instant, Position, TextStyle)>,
     tab_selections: std::collections::HashMap<String, (Position, Position)>,
+    table_selection: Option<TableSelection>,
     collaboration: Option<shared::SharedEditor>,
 }
 impl Editor {
@@ -84,12 +96,14 @@ impl Editor {
             rich_clipboard: None,
             last_insert: None,
             tab_selections: Default::default(),
+            table_selection: None,
             collaboration: None,
         };
         editor.sync_style();
         editor
     }
     fn restore(&mut self, s: Snapshot) -> Snapshot {
+        self.table_selection = None;
         if let Some(document) = s.full_document {
             let inverse = Snapshot::between(&self.doc, &document, self.caret, self.anchor);
             let inverse = Snapshot {
@@ -145,6 +159,7 @@ impl Editor {
         inverse
     }
     fn switch_tab_inner(&mut self, index: usize) -> bool {
+        self.table_selection = None;
         let id = self.doc.tabs[self.doc.active_tab].id.clone();
         self.tab_selections.insert(id, (self.caret, self.anchor));
         if !self.doc.select_tab(index) {
@@ -258,6 +273,7 @@ impl Editor {
         let anchor = self.anchor;
         f(self);
         if self.doc != old {
+            self.table_selection = None;
             if let Some(shared) = self.collaboration.as_mut() {
                 if let Err(error) = shared.commit(&old, &self.doc) {
                     shared.report(error);
@@ -315,6 +331,9 @@ impl Editor {
         }
     }
     pub fn selected(&self) -> bool {
+        self.has_scalar_selection() || !self.selected_table_cell_addresses().is_empty()
+    }
+    pub fn has_scalar_selection(&self) -> bool {
         self.caret != self.anchor
     }
     pub fn range(&self) -> (Position, Position) {
@@ -323,6 +342,228 @@ impl Editor {
         } else {
             (self.anchor, self.caret)
         }
+    }
+    fn paragraphs_in_selection(&self) -> Vec<Address> {
+        if let Some(selection) = self.table_selection {
+            return self.table_cell_addresses_for(selection);
+        }
+        let (start, end) = self.range();
+        self.doc
+            .addresses()
+            .into_iter()
+            .filter(|address| *address >= start.address && *address <= end.address)
+            .collect()
+    }
+    fn table_cell_addresses_for(&self, selection: TableSelection) -> Vec<Address> {
+        match selection {
+            TableSelection::Row { block, row } => {
+                let Some(Block::Table(rows)) = self.doc.blocks.get(block) else {
+                    return vec![];
+                };
+                let Some(cells) = rows.get(row) else {
+                    return vec![];
+                };
+                (0..cells.len())
+                    .map(|cell| Address { block, row, cell })
+                    .collect()
+            }
+            TableSelection::Column { block, column } => {
+                let Some(Block::Table(rows)) = self.doc.blocks.get(block) else {
+                    return vec![];
+                };
+                rows.iter()
+                    .enumerate()
+                    .filter_map(|(row, cells)| {
+                        (column < cells.len()).then_some(Address {
+                            block,
+                            row,
+                            cell: column,
+                        })
+                    })
+                    .collect()
+            }
+        }
+    }
+    fn transaction_preserving_table_selection(&mut self, f: impl FnOnce(&mut Self)) {
+        let selection = self.table_selection;
+        self.transaction(f);
+        if let Some(selection) = selection
+            && !self.table_cell_addresses_for(selection).is_empty()
+        {
+            self.table_selection = Some(selection);
+        }
+    }
+    /// Select a complete row without changing the scalar text caret or anchor.
+    pub fn select_table_row(&mut self, block: usize, row: usize) -> bool {
+        if matches!(self.doc.blocks.get(block), Some(Block::Table(rows)) if row < rows.len() && !rows[row].is_empty())
+        {
+            self.table_selection = Some(TableSelection::Row { block, row });
+            true
+        } else {
+            false
+        }
+    }
+    /// Select a complete column, including its cells in every row that has it.
+    pub fn select_table_column(&mut self, block: usize, column: usize) -> bool {
+        if matches!(self.doc.blocks.get(block), Some(Block::Table(rows)) if rows.iter().any(|r| column < r.len()))
+        {
+            self.table_selection = Some(TableSelection::Column { block, column });
+            true
+        } else {
+            false
+        }
+    }
+    pub fn table_selection(&self) -> Option<TableSelection> {
+        self.table_selection
+    }
+    pub fn clear_table_selection(&mut self) {
+        self.table_selection = None;
+    }
+    /// Addresses selected by the current row or column selection, in document order.
+    pub fn selected_table_cell_addresses(&self) -> Vec<Address> {
+        self.table_selection
+            .map(|selection| self.table_cell_addresses_for(selection))
+            .unwrap_or_default()
+    }
+    /// Plain-text copy representation for a row or column selection.
+    pub fn selected_table_text(&self) -> Option<String> {
+        let selection = self.table_selection?;
+        let addresses = self.table_cell_addresses_for(selection);
+        let mut lines = Vec::new();
+        match selection {
+            TableSelection::Row { .. } => {
+                lines.push(
+                    addresses
+                        .iter()
+                        .map(|address| {
+                            self.doc
+                                .paragraph(*address)
+                                .map_or_else(String::new, Paragraph::text)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\t"),
+                );
+            }
+            TableSelection::Column { block, column } => {
+                let Some(Block::Table(rows)) = self.doc.blocks.get(block) else {
+                    return Some(String::new());
+                };
+                lines.extend(
+                    rows.iter()
+                        .map(|row| row.get(column).map_or_else(String::new, Paragraph::text)),
+                );
+            }
+        }
+        Some(lines.join("\n"))
+    }
+    /// Clear text in selected cells as one undoable edit, preserving annotation anchors.
+    pub fn clear_selected_table_cells(&mut self) -> bool {
+        if self.selected_table_cell_addresses().is_empty() {
+            return false;
+        }
+        let revision = self.revision;
+        self.delete_selection();
+        self.revision != revision
+    }
+    fn set_checklist_items(editor: &mut Self, mut addresses: Vec<Address>) {
+        // Process body blocks from the end so splitting a paragraph does not
+        // invalidate the addresses that are still waiting to be handled.
+        addresses.sort_unstable_by(|left, right| right.cmp(left));
+        for address in addresses {
+            let split_body_hard_lines = address.row == 0
+                && address.cell == 0
+                && matches!(
+                    editor.doc.blocks.get(address.block),
+                    Some(Block::Paragraph(_))
+                );
+            if split_body_hard_lines {
+                let Some(Block::Paragraph(mut paragraph)) =
+                    editor.doc.blocks.get(address.block).cloned()
+                else {
+                    continue;
+                };
+                let mut items = Vec::new();
+                while let Some(offset) = paragraph
+                    .chars
+                    .iter()
+                    .position(|character| character.ch == '\n')
+                {
+                    let mut right = paragraph.split_text(offset);
+                    let remainder = right.split_text(1);
+                    if paragraph.list != ListKind::Check {
+                        paragraph.checked = false;
+                    }
+                    paragraph.list = ListKind::Check;
+                    items.push(Block::Paragraph(paragraph));
+                    paragraph = remainder;
+                }
+                if paragraph.list != ListKind::Check {
+                    paragraph.checked = false;
+                }
+                paragraph.list = ListKind::Check;
+                items.push(Block::Paragraph(paragraph));
+                editor
+                    .doc
+                    .blocks
+                    .splice(address.block..=address.block, items);
+            } else if let Some(paragraph) = editor.doc.paragraph_mut(address) {
+                if paragraph.list != ListKind::Check {
+                    paragraph.checked = false;
+                }
+                paragraph.list = ListKind::Check;
+            }
+        }
+    }
+    /// Apply checklist formatting to each selected paragraph, treating a partial
+    /// text selection as a selection of its whole paragraph.
+    pub fn set_checklist_for_selection(&mut self) {
+        let addresses = self.paragraphs_in_selection();
+        self.transaction_preserving_table_selection(|editor| {
+            Self::set_checklist_items(editor, addresses);
+        });
+    }
+    /// Toggle selected paragraphs between checklists and ordinary paragraphs.
+    pub fn toggle_checklist_for_selection(&mut self) {
+        let addresses = self.paragraphs_in_selection();
+        if addresses.is_empty() {
+            return;
+        }
+        let remove = addresses.iter().all(|address| {
+            self.doc
+                .paragraph(*address)
+                .is_some_and(|paragraph| paragraph.list == ListKind::Check)
+        });
+        self.transaction_preserving_table_selection(|editor| {
+            if remove {
+                for address in addresses {
+                    if let Some(paragraph) = editor.doc.paragraph_mut(address) {
+                        paragraph.list = ListKind::None;
+                        paragraph.checked = false;
+                    }
+                }
+            } else {
+                Self::set_checklist_items(editor, addresses);
+            }
+        });
+    }
+    /// Toggle an individual checklist item through the undoable editing engine.
+    pub fn toggle_check_checked(&mut self, address: Address) -> bool {
+        if !self.collaboration_writable()
+            || !self
+                .doc
+                .paragraph(address)
+                .is_some_and(|paragraph| paragraph.list == ListKind::Check)
+        {
+            return false;
+        }
+        self.transaction_preserving_table_selection(|editor| {
+            if let Some(paragraph) = editor.doc.paragraph_mut(address)
+                && paragraph.list == ListKind::Check
+            {
+                paragraph.checked = !paragraph.checked;
+            }
+        });
+        true
     }
     pub fn clamp(&mut self) {
         let first = self.doc.addresses().first().copied().unwrap_or_default();
@@ -346,6 +587,7 @@ impl Editor {
     }
     pub fn place(&mut self, pos: Position, extend: bool) {
         self.last_insert = None;
+        self.table_selection = None;
         self.caret = pos;
         self.clamp();
         if !extend {
@@ -367,6 +609,17 @@ impl Editor {
         }
     }
     pub fn selected_chars(&self) -> Vec<Vec<StyledChar>> {
+        if self.table_selection.is_some() {
+            return self
+                .selected_table_cell_addresses()
+                .into_iter()
+                .filter_map(|address| {
+                    self.doc
+                        .paragraph(address)
+                        .map(|paragraph| paragraph.chars.to_vec())
+                })
+                .collect();
+        }
         let (s, e) = self.range();
         self.doc
             .addresses()
@@ -385,6 +638,9 @@ impl Editor {
             .collect()
     }
     pub fn selected_text(&self) -> String {
+        if let Some(text) = self.selected_table_text() {
+            return text;
+        }
         self.selected_chars()
             .iter()
             .map(|c| c.iter().map(|c| c.ch).collect::<String>())
@@ -397,7 +653,24 @@ impl Editor {
         text
     }
     fn delete_inner(&mut self) {
-        if !self.selected() {
+        if self.table_selection.is_some() {
+            let addresses = self.selected_table_cell_addresses();
+            let Some(first) = addresses.first().copied() else {
+                return;
+            };
+            for address in addresses {
+                if let Some(paragraph) = self.doc.paragraph_mut(address) {
+                    paragraph.replace_text(0..paragraph.chars.len(), vec![]);
+                }
+            }
+            self.caret = Position {
+                address: first,
+                offset: 0,
+            };
+            self.anchor = self.caret;
+            return;
+        }
+        if !self.has_scalar_selection() {
             return;
         }
         if self.selection_covers_body() {
@@ -450,7 +723,7 @@ impl Editor {
     pub fn selection_covers_body(&self) -> bool {
         let (start, end) = self.range();
         let addresses = self.doc.addresses();
-        self.selected()
+        self.has_scalar_selection()
             && addresses.first() == Some(&start.address)
             && addresses.last() == Some(&end.address)
             && start.offset == 0
@@ -465,7 +738,8 @@ impl Editor {
         let single = !text.contains('\n') && text.graphemes(true).count() == 1;
         let merge = self.collaboration.is_none()
             && single
-            && !self.selected()
+            && !self.has_scalar_selection()
+            && self.table_selection.is_none()
             && self
                 .last_insert
                 .as_ref()
@@ -619,7 +893,10 @@ impl Editor {
         }
     }
     pub fn move_horizontal(&mut self, forward: bool, extend: bool, word: bool) {
-        if self.selected() && !extend {
+        if self.table_selection.is_some() {
+            self.table_selection = None;
+        }
+        if self.has_scalar_selection() && !extend {
             let (s, e) = self.range();
             self.place(if forward { e } else { s }, false);
             return;
@@ -672,7 +949,21 @@ impl Editor {
     }
     pub fn format(&mut self, f: impl Fn(&mut TextStyle)) {
         f(&mut self.typing);
-        if !self.selected() {
+        if self.table_selection.is_some() {
+            let addresses = self.selected_table_cell_addresses();
+            self.transaction_preserving_table_selection(|editor| {
+                for address in addresses {
+                    if let Some(paragraph) = editor.doc.paragraph_mut(address) {
+                        f(&mut paragraph.style);
+                        for character in &mut paragraph.chars {
+                            f(&mut character.style);
+                        }
+                    }
+                }
+            });
+            return;
+        }
+        if !self.has_scalar_selection() {
             if self
                 .doc
                 .paragraph(self.caret.address)
@@ -709,6 +1000,18 @@ impl Editor {
         });
     }
     pub fn paragraph_format(&mut self, f: impl Fn(&mut Paragraph)) {
+        if self.table_selection.is_some() {
+            let addresses = self.selected_table_cell_addresses();
+            self.transaction_preserving_table_selection(|editor| {
+                for address in addresses {
+                    if let Some(paragraph) = editor.doc.paragraph_mut(address) {
+                        f(paragraph);
+                    }
+                }
+            });
+            self.sync_style();
+            return;
+        }
         let (s, e) = self.range();
         self.transaction(|ed| {
             for a in ed.doc.addresses() {
@@ -857,6 +1160,282 @@ fn snapshot_weight(snapshot: &Snapshot) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn checklist_selection_is_undoable_and_preserves_rich_paragraph_data() {
+        let mut first = Paragraph::from_text("A👩‍🔬B");
+        first.chars[0].style.bold = true;
+        first.annotations = vec![TextAnnotation {
+            id: "thread-one".into(),
+            start: 1,
+            end: 4,
+            comments: Default::default(),
+            reactions: Default::default(),
+        }]
+        .into();
+        let second = Paragraph::from_text("cafe\u{301}");
+        let mut doc = Document::new("Checklist selection");
+        doc.blocks = vec![Block::Paragraph(first), Block::Paragraph(second)];
+        let unchanged = doc.clone();
+        let mut editor = Editor::new(doc);
+        editor.anchor = Position {
+            address: Address::default(),
+            offset: 1,
+        };
+        editor.caret = Position {
+            address: Address {
+                block: 1,
+                ..Address::default()
+            },
+            offset: 2,
+        };
+
+        editor.toggle_checklist_for_selection();
+        for block in 0..2 {
+            assert_eq!(
+                editor
+                    .doc
+                    .paragraph(Address {
+                        block,
+                        ..Address::default()
+                    })
+                    .unwrap()
+                    .list,
+                ListKind::Check
+            );
+        }
+        let first_after = editor.doc.paragraph(Address::default()).unwrap();
+        assert_eq!(first_after.text(), "A👩‍🔬B");
+        assert!(first_after.chars[0].style.bold);
+        assert_eq!(first_after.annotations[0].start, 1);
+        assert_eq!(first_after.annotations[0].end, 4);
+        assert_eq!(
+            unchanged.paragraph(Address::default()).unwrap().list,
+            ListKind::None
+        );
+
+        assert!(editor.toggle_check_checked(Address::default()));
+        assert!(editor.doc.paragraph(Address::default()).unwrap().checked);
+        editor.undo();
+        assert!(!editor.doc.paragraph(Address::default()).unwrap().checked);
+        editor.undo();
+        assert_eq!(
+            editor.doc.paragraph(Address::default()).unwrap().list,
+            ListKind::None
+        );
+        assert_eq!(
+            editor
+                .doc
+                .paragraph(Address {
+                    block: 1,
+                    ..Address::default()
+                })
+                .unwrap()
+                .list,
+            ListKind::None
+        );
+        editor.redo();
+        editor.redo();
+        assert!(editor.doc.paragraph(Address::default()).unwrap().checked);
+    }
+
+    #[test]
+    fn checklist_splits_body_hard_lines_and_preserves_styling_and_annotations() {
+        let mut paragraph = Paragraph::from_text("one\n👩‍🔬\nthree");
+        paragraph.chars[4].style.bold = true;
+        paragraph.annotations = vec![TextAnnotation {
+            id: "line-note".into(),
+            start: 4,
+            end: 7,
+            comments: Default::default(),
+            reactions: Default::default(),
+        }]
+        .into();
+        let mut doc = Document::new("Hard lines");
+        doc.blocks = vec![Block::Paragraph(paragraph)];
+        let original = doc.clone();
+        let mut editor = Editor::new(doc);
+
+        editor.set_checklist_for_selection();
+        assert_eq!(editor.doc.blocks.len(), 3);
+        let items = editor
+            .doc
+            .blocks
+            .iter()
+            .map(|block| match block {
+                Block::Paragraph(paragraph) => paragraph,
+                _ => panic!("hard lines remain body paragraphs"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            items
+                .iter()
+                .map(|paragraph| paragraph.text())
+                .collect::<Vec<_>>(),
+            ["one", "👩‍🔬", "three"]
+        );
+        assert!(
+            items
+                .iter()
+                .all(|paragraph| paragraph.list == ListKind::Check && !paragraph.checked)
+        );
+        assert!(items[1].chars[0].style.bold);
+        assert_eq!(items[1].annotations[0].id, "line-note");
+        assert_eq!(
+            (items[1].annotations[0].start, items[1].annotations[0].end),
+            (0, 3)
+        );
+        assert_eq!(original.blocks.len(), 1);
+
+        editor.undo();
+        assert_eq!(editor.doc, original);
+        editor.redo();
+        assert_eq!(editor.doc.blocks.len(), 3);
+    }
+
+    #[test]
+    fn table_row_and_column_selection_support_copy_format_clear_and_undo() {
+        let mut table = vec![
+            vec![Paragraph::from_text("a"), Paragraph::from_text("b")],
+            vec![Paragraph::from_text("c"), Paragraph::from_text("d")],
+        ];
+        table[1][0].annotations = vec![TextAnnotation {
+            id: "cell-thread".into(),
+            start: 0,
+            end: 1,
+            comments: Default::default(),
+            reactions: Default::default(),
+        }]
+        .into();
+        let mut doc = Document::new("Table selection");
+        doc.blocks = vec![Block::Table(table)];
+        let mut editor = Editor::new(doc);
+        editor.place(
+            Position {
+                address: Address {
+                    block: 0,
+                    row: 0,
+                    cell: 1,
+                },
+                offset: 1,
+            },
+            false,
+        );
+        let scalar_selection = editor.range();
+
+        assert!(editor.select_table_row(0, 1));
+        assert_eq!(editor.range(), scalar_selection);
+        assert_eq!(
+            editor.selected_table_cell_addresses(),
+            vec![
+                Address {
+                    block: 0,
+                    row: 1,
+                    cell: 0
+                },
+                Address {
+                    block: 0,
+                    row: 1,
+                    cell: 1
+                },
+            ]
+        );
+        assert_eq!(editor.selected_table_text().as_deref(), Some("c\td"));
+        editor.format(|style| style.bold = true);
+        let Block::Table(rows) = &editor.doc.blocks[0] else {
+            panic!("table remains a table")
+        };
+        assert!(!rows[0][0].chars[0].style.bold);
+        assert!(rows[1].iter().all(|cell| cell.chars[0].style.bold));
+        assert_eq!(
+            editor.table_selection(),
+            Some(TableSelection::Row { block: 0, row: 1 })
+        );
+        let copied = editor.copy_fragment();
+        assert_eq!(copied.text, "c\td");
+        let [Block::Table(copied_rows)] = copied.blocks.as_slice() else {
+            panic!("selected row copied as a table")
+        };
+        assert_eq!(copied_rows.len(), 1);
+        assert!(copied_rows[0].iter().all(|cell| cell.chars[0].style.bold));
+        editor.undo();
+        let Block::Table(rows) = &editor.doc.blocks[0] else {
+            panic!("table remains a table")
+        };
+        assert!(rows[1].iter().all(|cell| !cell.chars[0].style.bold));
+        assert_eq!(editor.range(), scalar_selection);
+
+        assert!(editor.select_table_column(0, 1));
+        assert_eq!(editor.selected_table_text().as_deref(), Some("b\nd"));
+        editor.paste_fragment(&copied);
+        let Block::Table(rows) = &editor.doc.blocks[0] else {
+            panic!("table remains a table")
+        };
+        assert_eq!(rows[0][1].text(), "c\td");
+        assert_eq!(rows[1][1].text(), "");
+        editor.undo();
+        let Block::Table(rows) = &editor.doc.blocks[0] else {
+            panic!("table remains a table")
+        };
+        assert_eq!(rows[0][1].text(), "b");
+        assert_eq!(rows[1][1].text(), "d");
+
+        assert!(editor.select_table_column(0, 1));
+        editor.insert("typed");
+        let Block::Table(rows) = &editor.doc.blocks[0] else {
+            panic!("table remains a table")
+        };
+        assert_eq!(rows[0][1].text(), "typed");
+        assert_eq!(rows[1][1].text(), "");
+        editor.undo();
+        let Block::Table(rows) = &editor.doc.blocks[0] else {
+            panic!("table remains a table")
+        };
+        assert_eq!(rows[0][1].text(), "b");
+        assert_eq!(rows[1][1].text(), "d");
+
+        assert!(editor.select_table_column(0, 1));
+        let revision = editor.revision;
+        assert!(editor.clear_selected_table_cells());
+        assert_eq!(editor.revision, revision + 1);
+        let Block::Table(rows) = &editor.doc.blocks[0] else {
+            panic!("table remains a table")
+        };
+        assert_eq!(rows[0][1].text(), "");
+        assert_eq!(rows[1][1].text(), "");
+        editor.undo();
+        let Block::Table(rows) = &editor.doc.blocks[0] else {
+            panic!("table remains a table")
+        };
+        assert_eq!(rows[0][1].text(), "b");
+        assert_eq!(rows[1][1].text(), "d");
+        assert_eq!(rows[1][0].annotations[0].start, 0);
+        assert_eq!(rows[1][0].annotations[0].end, 1);
+    }
+
+    #[test]
+    fn read_only_collaboration_rejects_checklist_and_selected_cell_mutations() {
+        let mut doc = Document::new("Read-only edits");
+        doc.blocks = vec![
+            Block::Paragraph(Paragraph::from_text("item")),
+            Block::Table(vec![vec![Paragraph::from_text("cell")]]),
+        ];
+        let mut editor = Editor::new(doc);
+        let room = Arc::new(Mutex::new(crate::collaboration::live::Room::new(
+            crate::collaboration::replica::Replica::new(&editor.doc).unwrap(),
+            false,
+            "Viewer".into(),
+        )));
+        editor.attach_collaboration(room).unwrap();
+        let before = editor.doc.clone();
+        editor.set_checklist_for_selection();
+        assert!(!editor.toggle_check_checked(Address::default()));
+        assert!(editor.select_table_row(1, 0));
+        assert!(!editor.clear_selected_table_cells());
+        assert_eq!(editor.doc, before);
+    }
+
     #[test]
     fn citation_snapshot_payload_counts_toward_history_budget() {
         let mut doc = Document::new("Citation history");

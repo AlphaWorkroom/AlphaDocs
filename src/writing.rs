@@ -243,9 +243,10 @@ pub fn percent(text: &str) -> String {
         })
         .collect()
 }
-fn get_json(url: &str) -> Result<serde_json::Value, String> {
-    let bytes = get_bytes(url)?;
-    serde_json::from_slice(&bytes).map_err(|_| "The service returned an invalid response".into())
+const MAX_DICTIONARY_OUTPUT_CHARS: usize = 20_000;
+
+fn dictionary_json(bytes: &[u8]) -> Result<serde_json::Value, String> {
+    serde_json::from_slice(bytes).map_err(|_| "The dictionary returned an invalid response".into())
 }
 
 /// Parse one MyMemory response without contacting the service. The service returns
@@ -321,12 +322,41 @@ pub fn dictionary(word: &str) -> Result<String, String> {
     {
         return Err("Enter one English word (up to 80 characters).".into());
     }
-    let value = get_json(&format!(
-        "https://api.dictionaryapi.dev/api/v2/entries/en/{}",
-        percent(word)
-    ))?;
+    dictionary_with(word, get_dictionary_bytes)
+}
+
+fn dictionary_with(
+    word: &str,
+    mut fetch: impl FnMut(&str) -> Result<Vec<u8>, String>,
+) -> Result<String, String> {
+    if word.is_empty()
+        || word.chars().count() > 80
+        || word
+            .chars()
+            .any(|c| !c.is_alphabetic() && c != '-' && c != '\'')
+    {
+        return Err("Enter one English word (up to 80 characters).".into());
+    }
+    let encoded = percent(word);
+    let primary = format!("https://api.dictionaryapi.dev/api/v2/entries/en/{encoded}");
+    if let Ok(bytes) = fetch(&primary)
+        && let Ok(value) = dictionary_json(&bytes)
+        && let Ok(text) = format_free_dictionary(&value, word)
+    {
+        return Ok(text);
+    }
+
+    let fallback = format!("https://en.wiktionary.org/api/rest_v1/page/definition/{encoded}");
+    let bytes = fetch(&fallback).map_err(|_| {
+        "No definition is available right now. Try again later or check the spelling.".to_owned()
+    })?;
+    parse_wiktionary_definition(&bytes, word)
+}
+
+fn format_free_dictionary(value: &serde_json::Value, word: &str) -> Result<String, String> {
     let entries = value.as_array().ok_or("No definition found")?;
     let mut out = String::new();
+    let mut count = 0usize;
     for entry in entries.iter().take(4) {
         out.push_str(&format!(
             "{}  {}\n\n",
@@ -338,11 +368,12 @@ pub fn dictionary(word: &str) -> Result<String, String> {
                 out.push_str(&format!("{}\n", m["partOfSpeech"].as_str().unwrap_or("")));
                 if let Some(defs) = m["definitions"].as_array() {
                     for (i, d) in defs.iter().take(8).enumerate() {
-                        out.push_str(&format!(
-                            "{}. {}\n",
-                            i + 1,
-                            d["definition"].as_str().unwrap_or("")
-                        ));
+                        let definition = d["definition"].as_str().unwrap_or("").trim();
+                        if definition.is_empty() {
+                            continue;
+                        }
+                        count += 1;
+                        out.push_str(&format!("{}. {definition}\n", i + 1));
                         if let Some(example) = d["example"].as_str() {
                             out.push_str(&format!("“{example}”\n"));
                         }
@@ -360,7 +391,54 @@ pub fn dictionary(word: &str) -> Result<String, String> {
             out.push_str(&format!("Licence: {name}\n"));
         }
     }
-    Ok(out)
+    if count == 0 {
+        return Err("No definition found".into());
+    }
+    Ok(out.chars().take(MAX_DICTIONARY_OUTPUT_CHARS).collect())
+}
+
+fn parse_wiktionary_definition(bytes: &[u8], word: &str) -> Result<String, String> {
+    let value = dictionary_json(bytes)?;
+    let entries = value["en"].as_array().ok_or("No definition found")?;
+    let mut out = String::new();
+    for entry in entries.iter().take(8) {
+        let pos = entry["partOfSpeech"].as_str().unwrap_or("").trim();
+        if !pos.is_empty() {
+            out.push_str(pos);
+            out.push('\n');
+        }
+        let definitions = entry["definitions"]
+            .as_array()
+            .ok_or("No definition found")?;
+        for (index, definition) in definitions.iter().take(12).enumerate() {
+            let html = definition["definition"].as_str().unwrap_or("");
+            let fragment = scraper::Html::parse_fragment(html);
+            let plain = fragment.root_element().text().collect::<String>();
+            let plain = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+            if !plain.is_empty() {
+                out.push_str(&format!("{}. {plain}\n", index + 1));
+            }
+            if let Some(examples) = definition["examples"].as_array() {
+                for example in examples.iter().take(2).filter_map(|v| v.as_str()) {
+                    let fragment = scraper::Html::parse_fragment(example);
+                    let plain = fragment.root_element().text().collect::<String>();
+                    let plain = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+                    if !plain.is_empty() {
+                        out.push_str(&format!("“{plain}”\n"));
+                    }
+                }
+            }
+        }
+        out.push('\n');
+    }
+    if out.trim().is_empty() {
+        return Err("No definition found".into());
+    }
+    out.push_str(&format!(
+        "Source: English Wiktionary contributors — https://en.wiktionary.org/wiki/{}\nLicence: CC BY-SA 4.0 — https://creativecommons.org/licenses/by-sa/4.0/",
+        percent(word)
+    ));
+    Ok(out.chars().take(MAX_DICTIONARY_OUTPUT_CHARS).collect())
 }
 pub const LANGUAGES: [(&str, &str); 14] = [
     ("en", "English"),
@@ -435,6 +513,32 @@ fn get_bytes(url: &str) -> Result<Vec<u8>, String> {
         .limit(MAX_HTTP_RESPONSE_BYTES as u64)
         .read_to_vec()
         .map_err(|e| format!("Could not read the service response: {e}"))
+}
+
+fn get_dictionary_bytes(url: &str) -> Result<Vec<u8>, String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .https_only(true)
+        .max_redirects(0)
+        .timeout_global(Some(Duration::from_secs(8)))
+        .build()
+        .into();
+    agent
+        .get(url)
+        .header(
+            "User-Agent",
+            concat!(
+                "AlphaDocs/",
+                env!("CARGO_PKG_VERSION"),
+                " (https://github.com/AlphaWorkroom/AlphaDocs)"
+            ),
+        )
+        .call()
+        .map_err(|e| format!("Dictionary service unavailable: {e}"))?
+        .body_mut()
+        .with_config()
+        .limit(MAX_HTTP_RESPONSE_BYTES as u64)
+        .read_to_vec()
+        .map_err(|e| format!("Could not read dictionary response: {e}"))
 }
 
 fn translate_with(
@@ -574,6 +678,84 @@ fn apply_translation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const WIKTIONARY_HIPPO: &[u8] = br#"{"en":[{"partOfSpeech":"Noun","definitions":[{"definition":"Clipping of <a href=\"/wiki/hippopotamus\">hippopotamus</a>.","examples":["A <b>hippo</b> swims."]},{"definition":"An armored personnel carrier."}]}]}"#;
+
+    #[test]
+    fn dictionary_uses_primary_provider_and_only_requests_fallback_after_failure() {
+        let primary = r#"[{"word":"hippo","phonetic":"/hip-oh/","meanings":[{"partOfSpeech":"noun","definitions":[{"definition":"A hippopotamus."}]}],"sourceUrls":["https://example.test/hippo"],"license":{"name":"CC BY-SA 3.0"}}]"#.as_bytes();
+        let mut requested = Vec::new();
+        let result = dictionary_with("hippo", |url| {
+            requested.push(url.to_owned());
+            Ok(primary.to_vec())
+        })
+        .unwrap();
+        assert!(result.contains("A hippopotamus."));
+        assert_eq!(requested.len(), 1);
+        assert!(requested[0].starts_with("https://api.dictionaryapi.dev/"));
+
+        requested.clear();
+        let result = dictionary_with("hippo", |url| {
+            requested.push(url.to_owned());
+            if url.starts_with("https://api.dictionaryapi.dev/") {
+                Err("offline".into())
+            } else {
+                Ok(WIKTIONARY_HIPPO.to_vec())
+            }
+        })
+        .unwrap();
+        assert!(result.contains("Clipping of hippopotamus."));
+        assert!(result.contains("A hippo swims."));
+        assert!(result.contains("CC BY-SA 4.0"));
+        assert_eq!(requested.len(), 2);
+        assert!(requested[1].starts_with("https://en.wiktionary.org/api/rest_v1/"));
+    }
+
+    #[test]
+    fn dictionary_falls_back_on_malformed_primary_and_bounds_failures() {
+        let mut calls = 0;
+        let result = dictionary_with("hippo", |_| {
+            calls += 1;
+            if calls == 1 {
+                Ok(b"not json".to_vec())
+            } else {
+                Ok(WIKTIONARY_HIPPO.to_vec())
+            }
+        })
+        .unwrap();
+        assert!(result.contains("Clipping of hippopotamus."));
+        assert_eq!(calls, 2);
+
+        let error = dictionary_with("hippo", |_| Err("service details".into())).unwrap_err();
+        assert!(error.contains("Try again later"));
+        assert!(!error.contains("service details"));
+        assert!(dictionary_with("hippo", |_| Ok(b"{}".to_vec())).is_err());
+        assert!(
+            dictionary_with("hippo?secret", |_| panic!("invalid input must not be sent")).is_err()
+        );
+    }
+
+    #[test]
+    fn dictionary_output_is_sanitized_and_capped() {
+        let huge = format!(
+            "{{\"en\":[{{\"partOfSpeech\":\"noun\",\"definitions\":[{{\"definition\":\"{}\"}}]}}]}}",
+            "word ".repeat(6_000)
+        );
+        let result = parse_wiktionary_definition(huge.as_bytes(), "word").unwrap();
+        assert!(result.chars().count() <= MAX_DICTIONARY_OUTPUT_CHARS);
+        assert!(!parse_wiktionary_definition(b"not json", "word").is_ok());
+    }
+
+    #[test]
+    #[ignore = "explicit live-service diagnostic; uses only the synthetic query 'hippo'"]
+    fn live_dictionary_hippo_diagnostic() {
+        let result = dictionary("hippo").unwrap();
+        assert!(result.to_lowercase().contains("hippo"));
+        eprintln!(
+            "Synthetic dictionary diagnostic succeeded ({} chars)",
+            result.chars().count()
+        );
+    }
 
     #[test]
     fn translation_response_decodes_text_and_rejects_quota_or_malformed_data() {

@@ -37,7 +37,7 @@ ui.set_width(if matches!(dialog,
 Dialog::Help | Dialog::About){
 540.0}
 else{
-if matches!(dialog, Dialog::Page) {348.0} else {368.0}}
+if matches!(dialog, Dialog::Page) {348.0} else if matches!(dialog, Dialog::ColourPicker) {360.0} else {368.0}}
 );
 match dialog{
         Dialog::Tool(tool) => self.tool_dialog(tool,ui,&mut close),
@@ -216,6 +216,7 @@ close = true;
 }
 if ui.button("Done").clicked() { close = true; }
 },
+        Dialog::ColourPicker => self.colour_picker_dialog(ui, &mut close),
         Dialog::Symbols=>{
 ui.label(RichText::new("Special characters").size(24.0));
 ui.add_space(16.0);

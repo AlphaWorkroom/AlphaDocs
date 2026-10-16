@@ -29,6 +29,12 @@ if sys.platform == "darwin":
     resources.mkdir(parents=True, exist_ok=True)
     shutil.copy2(root / "dist/alphadocs", macos / "alphadocs")
     os.chmod(macos / "alphadocs", 0o755)
+    speech_files = ("alphadocs-speech",)
+    if any(not (root / "dist" / name).is_file() for name in speech_files):
+        raise SystemExit("Speech-enabled macOS package is missing its native sidecar")
+    for name in speech_files:
+        shutil.copy2(root / "dist" / name, macos / name)
+        os.chmod(macos / name, 0o755)
     shutil.copytree(root / "dist", resources / "package", dirs_exist_ok=True, ignore=shutil.ignore_patterns("alphadocs"))
     icons = work / "AlphaDocs.iconset"
     icons.mkdir(exist_ok=True)
@@ -38,6 +44,7 @@ if sys.platform == "darwin":
             subprocess.run(["sips", "-z", str(size * scale), str(size * scale), str(root / "assets/alphadocs-icon.png"), "--out", str(icons / name)], check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["iconutil", "-c", "icns", str(icons), "-o", str(resources / "AlphaDocs.icns")], check=True)
     info = {"CFBundleName": "AlphaDocs", "CFBundleDisplayName": "AlphaDocs", "CFBundleIdentifier": "studio.alphaworkroom.alphadocs", "CFBundleExecutable": "alphadocs", "CFBundleIconFile": "AlphaDocs.icns", "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version, "CFBundleVersion": version, "LSMinimumSystemVersion": "14.0", "NSHighResolutionCapable": True,
+            "NSMicrophoneUsageDescription": "AlphaDocs uses the microphone only while you explicitly start offline speech input.",
             "CFBundleDocumentTypes": [{"CFBundleTypeName": "AlphaDocs document", "CFBundleTypeExtensions": ["adocs"], "CFBundleTypeRole": "Editor", "LSHandlerRank": "Owner"}]}
     (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
     subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
@@ -73,7 +80,7 @@ elif sys.platform == "linux":
     shutil.copyfile(root / "assets/alphadocs-icon.png", icon)
     control = package / "DEBIAN"
     control.mkdir(exist_ok=True)
-    (control / "control").write_text(f"Package: alphadocs\nVersion: {version}\nArchitecture: amd64\nMaintainer: Alpha Workroom\nSection: editors\nPriority: optional\nDepends: libc6 (>= 2.35), libgcc-s1, libfontconfig1, libx11-6, libx11-xcb1, libxcursor1, libxrandr2, libxi6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libwayland-cursor0, libwayland-egl1, libegl1, libgl1\nRecommends: xdg-desktop-portal, xdg-desktop-portal-gtk\nHomepage: https://github.com/AlphaWorkroom/AlphaDocs\nDescription: Offline native document editor by Alpha Workroom\n", encoding="utf-8")
+    (control / "control").write_text(f"Package: alphadocs\nVersion: {version}\nArchitecture: amd64\nMaintainer: Alpha Workroom\nSection: editors\nPriority: optional\nDepends: libc6 (>= 2.35), libgcc-s1, libstdc++6, libasound2, libfontconfig1, libx11-6, libx11-xcb1, libxcursor1, libxrandr2, libxi6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libwayland-cursor0, libwayland-egl1, libegl1, libgl1\nRecommends: xdg-desktop-portal, xdg-desktop-portal-gtk\nHomepage: https://github.com/AlphaWorkroom/AlphaDocs\nDescription: Offline native document editor by Alpha Workroom\n", encoding="utf-8")
     deb = out / "AlphaDocs-Linux-x86_64.deb"
     subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(package), str(deb)], check=True)
     outputs.append(deb)

@@ -338,7 +338,7 @@ fn toggle_maximize(ctx: &Context) {
     let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
 }
-fn window_button(ui: &mut Ui, label: &str, kind: u8, p: Palette) -> egui::Response {
+pub(super) fn window_button(ui: &mut Ui, label: &str, kind: u8, p: Palette) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(vec2(46.0, 42.0), Sense::hover());
     let response = ui.interact(rect, Id::new(("window_button", label)), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));

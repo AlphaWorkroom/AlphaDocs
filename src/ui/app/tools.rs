@@ -17,6 +17,7 @@ pub(super) enum Tool {
     Translate,
     PersonalDictionary,
     Voice,
+    Signing,
     Notifications,
     Accessibility,
 }
@@ -30,6 +31,7 @@ impl Tool {
             Self::Translate => "Translate document",
             Self::PersonalDictionary => "Personal dictionary",
             Self::Voice => "Voice typing",
+            Self::Signing => "eSignature",
             Self::Notifications => "Notification settings",
             Self::Accessibility => "Accessibility",
         }
@@ -102,7 +104,9 @@ impl AlphaDocs {
                 self.queue(Action::Tool(tool));
             }
         }
-        ui.scope(|ui| {menu(ui,"eSignature","",false);}).response.on_hover_text("Verified signature requests and audit trails are not implemented. Insert an existing signature image using Insert → Image.");
+        if menu(ui, "eSignature…", "", true) {
+            self.queue(Action::Tool(Tool::Signing));
+        }
         if menu(ui, "Line numbers", "", true) {
             self.queue(Action::Tool(Tool::Lines));
         }
@@ -129,6 +133,16 @@ impl AlphaDocs {
         }
     }
     pub(super) fn open_tool(&mut self, tool: Tool) {
+        if tool == Tool::Voice {
+            self.voice.open = true;
+            self.dialog = None;
+            return;
+        }
+        if tool == Tool::Signing {
+            self.signing.open = true;
+            self.dialog = None;
+            return;
+        }
         if tool == Tool::Translate && !self.prefs.online_translation {
             return;
         }
@@ -245,7 +259,7 @@ impl AlphaDocs {
                         let r=ui.add(egui::TextEdit::singleline(&mut self.tools.query).hint_text("Search for a word").char_limit(80).desired_width(280.0));
                         let enter=r.lost_focus()&&ui.input(|i|i.key_pressed(Key::Enter));
                         if (ui.add_enabled(self.tools.job.is_none(),egui::Button::new("Search")).clicked()||enter)&&self.tools.job.is_none(){let q=self.tools.query.trim().to_owned();self.tool_job(ui.ctx(),move||writing::dictionary(&q).map(Output::Definition));}
-                        ui.add_space(8.0);ui.label(RichText::new("Search sends this word to Free Dictionary API (dictionaryapi.dev). No background lookups.").size(12.0).color(p.muted));
+                        ui.add_space(8.0);ui.label(RichText::new("Search sends only this word to Free Dictionary API, with English Wiktionary as a fallback. No background lookups.").size(12.0).color(p.muted));
                         ui.separator();ui.label(&self.tools.definition);
                     },_=>{}
                 }
@@ -563,13 +577,8 @@ impl AlphaDocs {
                     self.save_tool_preferences();
                 }
             }
-            Tool::Voice => {
-                ui.label("Use your operating system's dictation while the document caret is active. Recognised text enters AlphaDocs through the normal, undoable text input.");
-                ui.add_space(12.0);
-                ui.label(if cfg!(target_os="windows"){ "Windows: click inside the document, then press Windows + H. Configure Speech in Windows Settings first." }else if cfg!(target_os="macos"){"macOS: enable Dictation in System Settings → Keyboard, then use the configured Dictation shortcut while editing."}else{"Linux: use a dictation/input-method tool provided by your desktop. AlphaDocs does not include a speech-recognition engine."});
-                ui.add_space(12.0);
-                ui.label("AlphaDocs has no built-in microphone capture, language selector or voice editing commands. Your operating system controls microphone permission and whether speech processing uses an online service.");
-            }
+            Tool::Signing => {}
+            Tool::Voice => {}
             Tool::Notifications => {
                 ui.label("Notifications on this computer");
                 let r = ui.checkbox(

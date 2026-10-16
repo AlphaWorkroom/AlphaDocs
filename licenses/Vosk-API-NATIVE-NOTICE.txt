@@ -1,0 +1,20 @@
+Vosk API native library (libvosk.dll, libvosk.so, libvosk.dylib)
+
+The native Vosk API is distributed under the Apache License, Version 2.0.
+Copyright Alpha Cephei Inc. and contributors.
+
+Upstream source and binary releases:
+https://github.com/alphacep/vosk-api
+https://github.com/alphacep/vosk-api/releases/tag/v0.3.42
+
+The optional first-use native library is downloaded directly from the official v0.3.42 release
+archives. SHA-256 digests of the complete binary archives are pinned in
+scripts/prepare_speech.py. The Linux and Windows archives are x86-64. The
+macOS archive is universal and contains x86-64 and arm64 slices.
+
+This notice applies to the Vosk API library only. On Windows the upstream release also
+contains GCC/MinGW runtime DLLs; their separate notices are distributed in
+GCC-RUNTIME-EXCEPTION.txt, GPL-3.0.txt, MinGW-w64-RUNTIME-NOTICES.txt, and
+MinGW-winpthreads-COPYING.txt.
+
+Apache License 2.0 text: https://www.apache.org/licenses/LICENSE-2.0
