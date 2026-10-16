@@ -14,9 +14,11 @@ The DEB targets x86-64 Ubuntu 22.04+ and compatible Debian systems with glibc 2.
 
 ## macOS
 
-Choose Apple silicon (`aarch64`) or Intel (`x86_64`) for macOS 14 or newer. The PKG installs `AlphaDocs.app` into Applications. The tar archive contains the same app bundle for manual installation.
+Choose Apple silicon (`aarch64`) or Intel (`x86_64`) for macOS 14 or newer. Open the **DMG**, drag **AlphaDocs.app** onto **Applications**, eject the disk image, then open AlphaDocs from Applications. The disk includes a Read Me with installation and Mac controls. The app bundle retains the exact licence and dependency notices. The tar archive and legacy PKG remain available; new update checks prefer the DMG.
 
-These initial packages are **not Apple-notarised** and PKG files do not have a Developer ID Installer signature. App bundles are ad-hoc signed for code integrity, which does not establish an Apple-verified publisher. macOS may refuse to open these downloads under its normal Gatekeeper policy. No signing identity or notarisation credentials are bundled or invented. A future Developer ID/notarised release is needed for the usual seamless installation experience.
+The app is **not Developer ID signed or Apple-notarised**. An ad-hoc signature checks code integrity but does not identify an Apple-verified publisher. Changing PKG to DMG does not remove Gatekeeper's warning. After trying to open the installed app, if you trust the official download, go to **System Settings → Privacy & Security → Open Anyway** for AlphaDocs and confirm Open. This is Apple's per-app exception; do not disable Gatekeeper globally. [Apple's opening instructions](https://support.apple.com/en-us/102445). Managed Macs may restrict this option. Seamless distribution requires the owner's Apple Developer ID certificate and notarisation credentials; none are configured or included.
+
+**Mac controls:** Command+C/V/X/A copies, pastes, cuts or selects. Command+Z undoes; Command+Shift+Z redoes. Command+S saves. Option+Left/Right moves by word; Command+Left/Right moves to measured line boundaries; Command+Up/Down moves to content-tab bounds. Add Shift to select. Option+Delete deletes a word; Command+Delete deletes to the start of the line. Command+Shift+H opens Find and replace, preserving Command+H for macOS Hide. Control-click or a two-finger trackpad click opens context menus, including spelling corrections, image options and table commands. Menus, tooltips and Help show Mac shortcut labels.
 
 ## Updates and privacy
 

@@ -81,3 +81,12 @@ Google sign-in supplies identity, not document transport, presence, permissions 
 ## Historical prototype verification
 
 Two actual encrypted QUIC loopback tests pass under `cargo test --all-features`: host-enforced view/edit roles, rejected stale proposals with the caller retaining its draft, invalid capabilities, expiry/revocation, redacted invite debug text, and a wrong pinned host key unable to read the document. Minimal endpoint preset supplies the Rustls crypto provider; IP transports, discovery/reporting and port mapping remain explicitly restricted. No public peer session, real network NAT/reconnect test, concurrent editing UI or independent security audit has been performed.
+
+
+## Nearby invitations (0.1.2)
+
+Share → Make this device visible enables a temporary, opt-in discovery service. Both devices must enable it on the same private IPv4 LAN and run a compatible AlphaDocs build. A TTL-1 IPv4 multicast beacon (239.255.77.77:44764) advertises only a chosen name, platform, ephemeral endpoint public key and port. It carries no document title, text or invitation capability. Public-source beacons, malformed/oversized messages and excess device entries are rejected; devices expire from the list after eight seconds. Firewalls and some Wi-Fi/VPN configurations block multicast, so manual invitations remain available.
+
+Invite sends the private live-session invitation/title over a separate bounded encrypted Iroh protocol pinned to the selected device's public key. The receiver must choose Join; receipt alone does not load a document or connect to the host. At most four offers can wait, one per sender; pending offers expire after 60 seconds. Nearby is stopped explicitly or on app exit, and is never restored automatically. Display/device names are not authenticated accounts; compare short IDs on the intended computers. Opt-in visibility is not a security audit or an internet sharing/relay service. It does not implement AirDrop or standalone file transfer.
+
+The Working together strip shows each connected person's current content tab (not a typing claim), plus a short ID for duplicate names. Caret/selection badges use the same stable colours. Peer names/tab titles are read from the shared room; local navigation remains local.

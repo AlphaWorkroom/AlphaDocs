@@ -175,6 +175,7 @@ pub struct AlphaDocs {
     content_cache: DocumentContentCache,
     emoji_picker: emoji_picker::EmojiPicker,
     table_drag: Option<table_controls::TableDrag>,
+    context_pointer: super::platform::ContextPointer,
     tab_rename: Option<(String, String)>,
     view_tab_id: String,
     feature_search_open: bool,
@@ -296,6 +297,7 @@ impl AlphaDocs {
             content_cache: DocumentContentCache::default(),
             emoji_picker: emoji_picker::EmojiPicker::default(),
             table_drag: None,
+            context_pointer: Default::default(),
             tab_rename: None,
             feature_search_open: false,
             feature_query: String::new(),
@@ -1251,6 +1253,10 @@ impl AlphaDocs {
                     self.queue(Action::Help);
                 }
                 ui.separator();
+                if menu(ui, "Send feedback or report a bug…", "", true) {
+                    ui.ctx()
+                        .open_url(egui::OpenUrl::new_tab(help::FEEDBACK_FORM));
+                }
                 if menu(ui, "About AlphaDocs", "", true) {
                     self.queue(Action::About);
                 }
@@ -1851,6 +1857,7 @@ impl AlphaDocs {
                 if !self.prefs.compact_menus {
                     self.header(ui);
                 }
+                self.collaboration_strip(ui);
                 Frame::new()
                     .inner_margin(Margin {
                         left: 16,
@@ -3110,6 +3117,14 @@ impl AlphaDocs {
         self.poll_sharing(ui.ctx());
         self.poll_paste(ui.ctx());
         let ctx = ui.ctx().clone();
+        if ctx.os() == egui::os::OperatingSystem::Mac
+            && ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::COMMAND, Key::F)
+            })
+        {
+            self.fullscreen = !self.fullscreen;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
+        }
         if !self.home
             && self.dialog.is_none()
             && !self.feature_search_open
@@ -3148,11 +3163,15 @@ impl AlphaDocs {
                 Err(e) => self.status = e,
             }
         }
+        let reverse_tab = ctx
+            .input_mut(|i| i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::Tab));
         if self.dialog.is_none()
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, Key::Tab))
+            && (reverse_tab || ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, Key::Tab)))
             && !self.tabs.tabs.is_empty()
         {
-            let index = (self.tabs.active.unwrap_or(0) + 1) % self.tabs.tabs.len();
+            let count = self.tabs.tabs.len();
+            let index =
+                (self.tabs.active.unwrap_or(0) + if reverse_tab { count - 1 } else { 1 }) % count;
             self.switch_tab(index);
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::N))
@@ -3184,6 +3203,7 @@ impl AlphaDocs {
             self.proofing_dialog(&ctx);
         }
         self.dialogs(&ctx);
+        self.nearby_prompt(&ctx);
         self.feature_search(&ctx);
         self.updates_ui(&ctx);
         if let Some(a) = self.action.take() {
@@ -3234,6 +3254,9 @@ impl AlphaDocs {
     }
 }
 impl eframe::App for AlphaDocs {
+    fn raw_input_hook(&mut self, ctx: &Context, raw_input: &mut egui::RawInput) {
+        self.context_pointer.translate(ctx.os(), raw_input);
+    }
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.update_ui(ui);
     }
@@ -3374,7 +3397,7 @@ fn menu_width(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool, width: f3
     ui.painter().text(
         pos2(rect.right() - 10.0, rect.center().y),
         Align2::RIGHT_CENTER,
-        shortcut,
+        super::platform::shortcut_label(ui.ctx(), shortcut),
         FontId::proportional(12.0),
         ui.visuals().weak_text_color(),
     );

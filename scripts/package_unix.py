@@ -1,4 +1,4 @@
-"""Build Linux DEB/tar or macOS app/PKG using native host tools."""
+"""Build Linux DEB/tar or macOS app/DMG/legacy PKG using native host tools."""
 from pathlib import Path
 import hashlib
 import json
@@ -41,6 +41,8 @@ if sys.platform == "darwin":
             "CFBundleDocumentTypes": [{"CFBundleTypeName": "AlphaDocs document", "CFBundleTypeExtensions": ["adocs"], "CFBundleTypeRole": "Editor", "LSHandlerRank": "Owner"}]}
     (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
     subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
+    from macos_dmg import build as build_dmg
+    outputs.append(build_dmg(app, out / f"AlphaDocs-macOS-{arch}.dmg"))
     # A relocatable component can silently "install" into the build-tree copy
     # found by Spotlight instead of /Applications. Pin the intended location.
     components = work / "components.plist"

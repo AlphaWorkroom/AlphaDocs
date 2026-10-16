@@ -27,8 +27,8 @@ pub fn installer(os: &str, arch: &str) -> Option<&'static str> {
     match (os, arch) {
         ("windows", "x86_64") => Some("AlphaDocs-Windows-x86_64-Setup.exe"),
         ("linux", "x86_64") => Some("AlphaDocs-Linux-x86_64.deb"),
-        ("macos", "aarch64") => Some("AlphaDocs-macOS-aarch64.pkg"),
-        ("macos", "x86_64") => Some("AlphaDocs-macOS-x86_64.pkg"),
+        ("macos", "aarch64") => Some("AlphaDocs-macOS-aarch64.dmg"),
+        ("macos", "x86_64") => Some("AlphaDocs-macOS-x86_64.dmg"),
         _ => None,
     }
 }
@@ -115,6 +115,21 @@ pub fn check() -> Result<Option<Available>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mac_updates_choose_only_the_correct_architecture_dmg() {
+        for arch in ["aarch64", "x86_64"] {
+            let name = format!("AlphaDocs-macOS-{arch}.dmg");
+            let page = "https://github.com/AlphaWorkroom/AlphaDocs/releases/tag/v1.0.0";
+            let url = format!(
+                "https://github.com/AlphaWorkroom/AlphaDocs/releases/download/v1.0.0/{name}"
+            );
+            let bytes = serde_json::to_vec(&serde_json::json!({"tag_name":"v1.0.0","html_url":page,"draft":false,"prerelease":false,"assets":[{"name":name,"browser_download_url":url}]})).unwrap();
+            assert_eq!(
+                parse(&bytes, "0.1.1", "macos", arch).unwrap().unwrap().url,
+                url
+            );
+        }
+    }
     fn release(tag: &str, draft: bool, prerelease: bool, url: &str) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({"tag_name":tag,"html_url":url,"draft":draft,"prerelease":prerelease,"assets":[{"name":"AlphaDocs-Windows-x86_64-Setup.exe","browser_download_url":format!("https://github.com/AlphaWorkroom/AlphaDocs/releases/download/{tag}/AlphaDocs-Windows-x86_64-Setup.exe")}]})).unwrap()
     }

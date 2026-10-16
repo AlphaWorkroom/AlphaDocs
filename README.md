@@ -25,10 +25,10 @@ Get installers and portable builds from [GitHub Releases](https://github.com/Alp
 | --- | --- | --- |
 | Windows 10/11, 64-bit | [Windows Setup](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-Windows-x86_64-Setup.exe) | [ZIP](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-Windows-x86_64-Portable.zip) |
 | Linux, x86-64, Ubuntu 22.04+ / compatible Debian systems | [DEB](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-Linux-x86_64.deb) | [tar.gz](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-Linux-x86_64.tar.gz) |
-| macOS 14+, Apple silicon | [PKG](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-macOS-aarch64.pkg) | [App bundle](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-macOS-aarch64.tar.gz) |
-| macOS 14+, Intel | [PKG](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-macOS-x86_64.pkg) | [App bundle](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-macOS-x86_64.tar.gz) |
+| macOS 14+, Apple silicon | [DMG](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-macOS-aarch64.dmg) | [App bundle](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-macOS-aarch64.tar.gz) |
+| macOS 14+, Intel | [DMG](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-macOS-x86_64.dmg) | [App bundle](https://github.com/AlphaWorkroom/AlphaDocs/releases/latest/download/AlphaDocs-macOS-x86_64.tar.gz) |
 
-The Windows installer requires .NET Framework 4.8. Downloads include the app, its licence and dependency notices; Rust is needed only to build from source. macOS builds currently use ad-hoc app signatures and unsigned installers, and are **not Apple-notarised**. See [installation and platform notes](docs/INSTALLATION.md).
+The Windows installer requires .NET Framework 4.8. Downloads include the app, its licence and dependency notices; Rust is needed only to build from source. macOS DMGs use drag-to-Applications installation. The app is ad-hoc signed and **not Apple-notarised**, so macOS may still require its per-app Open Anyway approval. See [installation and platform notes](docs/INSTALLATION.md).
 
 ## Features
 
@@ -110,3 +110,13 @@ Copyright © 2026 **Alpha Workroom**. Distributed under the supplied [AlphaDocs 
 Ordinary personal, educational, workplace and business use is permitted, including earning income from documents you create. Selling or monetising the software itself requires written permission; public downloadable copies must be distributed through GitHub. The full licence controls. This is a source-available project under custom terms, rather than a claim of an OSI-approved open-source licence.
 
 Third-party components retain their own licences. Fonts, dictionary and artwork notices are in `assets/` and `licenses/`; resolved dependency notices and required source archives accompany packaged downloads. AlphaDocs and Alpha Workroom branding remain with their rights holders.
+
+## Feedback and bug reports
+
+[Send feedback or report a bug](https://docs.google.com/forms/d/e/1FAIpQLSczvu4GiVbR1PXFWfW_arILYPqBVQKb5kq7uisTbHpCYZ60KQ/viewform?usp=publish-editor). This same Google Form is available in **Help → Send feedback or report a bug**. Include your AlphaDocs version, operating system, what you tried, what you expected, and what happened. Screenshots and a small non-sensitive example help us reproduce a problem. The app opens the form in your browser and does not upload your documents automatically.
+
+### Invite a nearby computer
+
+To invite someone into live editing, open **Share** on both computers, enter each person's display name and choose **Make this device visible**. On the host, start sharing, choose **Can edit** or **Can view**, then click **Invite** beside the other device. The receiver chooses **Join** or **Decline**. Both need this version of AlphaDocs. Nearby visibility is opt-in and stays on until stopped or the app closes. Discovery broadcasts only the chosen name, device type and temporary ID; private invitations travel over an encrypted, device-key-pinned connection. Names are not verified identities—compare the short device IDs on the two computers. Local discovery may be blocked by VPNs, firewalls or isolated Wi-Fi; the existing copy/paste invitation still works. This is live collaboration, not Apple's AirDrop or independent file transfer.
+
+The **Working together** strip names connected people and their current content tabs. Its colours match the larger caret/selection labels in the document. A label marks a person's selection or caret; it is not a claim that they are currently typing.

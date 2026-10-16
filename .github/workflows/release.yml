@@ -69,8 +69,12 @@ jobs:
       - name: Build Windows setup and portable ZIP
         if: runner.os == 'Windows'
         run: python scripts/build_windows_package.py
+      - name: Install pinned macOS packaging tools
+        if: runner.os == 'macOS'
+        run: python -m pip install -r scripts/macos-packaging-requirements.txt
       - name: Build native Unix installers
         if: runner.os != 'Windows'
+        # dmgbuild writes Finder metadata directly, without AppleScript/UI access.
         run: python scripts/package_unix.py
       - name: Verify Windows installer payload without changing the runner profile
         if: runner.os == 'Windows'

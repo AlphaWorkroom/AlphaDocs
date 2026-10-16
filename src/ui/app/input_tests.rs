@@ -1,4 +1,145 @@
 use super::*;
+fn mac_command() -> egui::Modifiers {
+    egui::Modifiers {
+        mac_cmd: true,
+        command: true,
+        ..Default::default()
+    }
+}
+#[test]
+fn mac_command_formatting_undo_redo_and_find_use_real_frames() {
+    let (ctx, mut app) = editor();
+    ctx.set_os(egui::os::OperatingSystem::Mac);
+    app.session.editor.insert("A café with words 🧑🏽‍💻");
+    image_frame(&ctx, &mut app, vec![]);
+    image_frame(&ctx, &mut app, vec![]);
+    ctx.memory_mut(|m| m.request_focus(Id::new("document_canvas")));
+    for k in [Key::A, Key::B] {
+        image_frame(&ctx, &mut app, vec![key(k, mac_command())]);
+    }
+    assert!(
+        app.session
+            .editor
+            .doc
+            .paragraph(app.session.editor.caret.address)
+            .unwrap()
+            .chars
+            .iter()
+            .all(|c| c.style.bold)
+    );
+    image_frame(&ctx, &mut app, vec![key(Key::Z, mac_command())]);
+    assert!(
+        app.session
+            .editor
+            .doc
+            .paragraph(app.session.editor.caret.address)
+            .unwrap()
+            .chars
+            .iter()
+            .all(|c| !c.style.bold)
+    );
+    image_frame(
+        &ctx,
+        &mut app,
+        vec![key(Key::Z, mac_command() | egui::Modifiers::SHIFT)],
+    );
+    assert!(
+        app.session
+            .editor
+            .doc
+            .paragraph(app.session.editor.caret.address)
+            .unwrap()
+            .chars
+            .iter()
+            .all(|c| c.style.bold)
+    );
+    image_frame(&ctx, &mut app, vec![key(Key::H, mac_command())]);
+    assert!(app.dialog.is_none(), "Cmd+H is reserved for macOS Hide");
+    image_frame(
+        &ctx,
+        &mut app,
+        vec![key(Key::H, mac_command() | egui::Modifiers::SHIFT)],
+    );
+    assert!(matches!(app.dialog, Some(Dialog::Find)));
+}
+#[test]
+fn mac_word_line_document_navigation_and_deletion_are_distinct_and_undoable() {
+    let (ctx, mut app) = editor();
+    ctx.set_os(egui::os::OperatingSystem::Mac);
+    app.session
+        .editor
+        .insert("First café line.\nSecond line with emoji 🧑🏽‍💻 and words.");
+    image_frame(&ctx, &mut app, vec![]);
+    image_frame(&ctx, &mut app, vec![]);
+    ctx.memory_mut(|m| m.request_focus(Id::new("document_canvas")));
+    let end = app.session.editor.caret;
+    let start = app.layout.as_ref().unwrap().boundary(end, false);
+    image_frame(
+        &ctx,
+        &mut app,
+        vec![key(Key::ArrowLeft, egui::Modifiers::ALT)],
+    );
+    assert!(
+        app.session.editor.caret.offset > start.offset
+            && app.session.editor.caret.offset < end.offset
+    );
+    image_frame(&ctx, &mut app, vec![key(Key::ArrowLeft, mac_command())]);
+    assert_eq!(app.session.editor.caret, start);
+    image_frame(&ctx, &mut app, vec![key(Key::ArrowDown, mac_command())]);
+    assert_eq!(app.session.editor.caret, end);
+    let original = app.session.editor.doc.clone();
+    image_frame(&ctx, &mut app, vec![key(Key::Backspace, mac_command())]);
+    assert_ne!(app.session.editor.doc, original);
+    image_frame(&ctx, &mut app, vec![key(Key::Z, mac_command())]);
+    assert_eq!(app.session.editor.doc, original);
+    image_frame(&ctx, &mut app, vec![key(Key::ArrowUp, mac_command())]);
+    assert_eq!(app.session.editor.caret.offset, 0);
+    image_frame(
+        &ctx,
+        &mut app,
+        vec![key(Key::ArrowDown, mac_command() | egui::Modifiers::SHIFT)],
+    );
+    assert!(app.session.editor.selected_text().contains("🧑🏽‍💻"));
+}
+#[test]
+fn mac_control_click_opens_image_menu_without_starting_a_primary_drag() {
+    let (ctx, mut app) = image_app();
+    ctx.set_os(egui::os::OperatingSystem::Mac);
+    select_image(&ctx, &mut app);
+    let original = app.session.editor.doc.clone();
+    let pos = ctx
+        .read_response(Id::new(("image", &0usize)))
+        .unwrap()
+        .rect
+        .center();
+    image_frame(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(pos),
+            Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::CTRL,
+            },
+        ],
+    );
+    image_frame(
+        &ctx,
+        &mut app,
+        vec![Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert!(egui::Popup::is_any_open(&ctx));
+    assert_eq!(app.image_block, Some(0));
+    assert!(app.image_drag.is_none());
+    assert_eq!(app.session.editor.doc, original);
+}
 #[test]
 fn feature_search_enter_opens_real_preferences_and_click_dismisses_destination_pulse() {
     let (ctx, mut app) = editor();
@@ -1149,19 +1290,18 @@ fn image_frame_cursor(ctx: &Context, app: &mut AlphaDocs, events: Vec<Event>) ->
     // Exercise the same chrome, input dispatch, fonts, panels and canvas as the
     // production app, while keeping autosave I/O out of isolated UI tests.
     app.last_autosave = Instant::now();
-    let mut output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(
-                Pos2::ZERO,
-                vec2(1000.0, if app.home { 1100.0 } else { 800.0 }),
-            )),
-            events,
-            ..Default::default()
-        },
-        |ui| {
-            app.update_ui(ui);
-        },
-    );
+    let mut raw_input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(
+            Pos2::ZERO,
+            vec2(1000.0, if app.home { 1100.0 } else { 800.0 }),
+        )),
+        events,
+        ..Default::default()
+    };
+    eframe::App::raw_input_hook(app, ctx, &mut raw_input);
+    let mut output = ctx.run_ui(raw_input, |ui| {
+        app.update_ui(ui);
+    });
     if let Some(update) = &output.platform_output.accesskit_update {
         assert!(
             update.nodes.iter().any(|(id, _)| *id == update.focus),

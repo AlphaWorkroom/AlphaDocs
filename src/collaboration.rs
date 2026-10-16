@@ -2,6 +2,7 @@
 //! The retained v1 snapshot/proposal experiment below is not used by the UI.
 use crate::model::Document;
 pub mod live;
+pub mod nearby;
 pub mod replica;
 #[cfg(test)]
 mod tests;
@@ -80,12 +81,15 @@ struct Envelope {
     request: Request,
 }
 async fn endpoint(ip: IpAddr) -> Result<Endpoint, String> {
+    endpoint_for(ip, vec![ALPN.to_vec(), b"alphadocs/live/2".to_vec()]).await
+}
+async fn endpoint_for(ip: IpAddr, alpns: Vec<Vec<u8>>) -> Result<Endpoint, String> {
     Builder::empty()
         .preset(iroh::endpoint::presets::Minimal)
         .clear_ip_transports()
         .portmapper_config(PortmapperConfig::Disabled)
         .net_report_config(iroh::NetReportConfig::minimal())
-        .alpns(vec![ALPN.to_vec(), b"alphadocs/live/2".to_vec()])
+        .alpns(alpns)
         .bind_addr(SocketAddr::new(ip, 0))
         .map_err(|e| e.to_string())?
         .bind()

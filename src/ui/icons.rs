@@ -531,7 +531,7 @@ fn paint_button(
         ui.visuals().weak_text_color().gamma_multiply(0.5)
     };
     draw(ui, rect, icon, color);
-    response.on_hover_text(label)
+    response.on_hover_text(super::platform::shortcut_label(ui.ctx(), label))
 }
 pub fn brand(ui: &mut Ui, rect: Rect, _color: Color32) {
     let rect = Rect::from_center_size(

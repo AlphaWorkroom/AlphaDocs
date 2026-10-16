@@ -130,7 +130,7 @@ impl AlphaDocs {
                         else {ui.ctx().request_discard("Measure comment composer before focusing it");}
                     }
                     ui.horizontal(|ui| {
-                        if (primary(ui,"Comment",p,!self.comment_draft.trim().is_empty() && !self.session.viewing).on_hover_text("Ctrl+Enter to post").clicked() || submit) && !self.session.viewing && !self.comment_draft.trim().is_empty() {
+                        if (primary(ui,"Comment",p,!self.comment_draft.trim().is_empty() && !self.session.viewing).on_hover_text(super::super::platform::shortcut_label(ui.ctx(), "Ctrl+Enter to post")).clicked() || submit) && !self.session.viewing && !self.comment_draft.trim().is_empty() {
                             let added=if let Some((range,rev))=self.text_comment_range {
                                 if rev==self.session.editor.revision {self.session.editor.annotate_text(range,Some(&self.comment_draft),None)}else{self.status="Text changed while drafting. Select its range again.".into();None}
                             }else{self.session.editor.add_annotation_comment(&id,&self.comment_draft).map(|_|id.clone())};

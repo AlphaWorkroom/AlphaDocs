@@ -281,7 +281,11 @@ impl AlphaDocs {
                             let row = ui.add_enabled(
                                 enabled,
                                 egui::Button::new(
-                                    RichText::new(format!("{label}\n{hint}")).size(14.0),
+                                    RichText::new(format!(
+                                        "{label}\n{}",
+                                        super::super::platform::shortcut_label(ui.ctx(), hint)
+                                    ))
+                                    .size(14.0),
                                 )
                                 .selected(self.feature_index == index)
                                 .corner_radius(10)

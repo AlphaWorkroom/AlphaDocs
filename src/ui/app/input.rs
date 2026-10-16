@@ -16,6 +16,16 @@ impl AlphaDocs {
             self.execute(Action::Proofing, ctx);
             return;
         }
+        let mac = ctx.os() == egui::os::OperatingSystem::Mac;
+        // Cmd+H belongs to macOS Hide. Find/replace uses Cmd+Shift+H.
+        if mac
+            && ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::H)
+            })
+        {
+            self.execute(Action::Find, ctx);
+            return;
+        }
         for (key, action) in [
             (Key::S, Action::Save),
             (Key::O, Action::Open),
@@ -23,6 +33,9 @@ impl AlphaDocs {
             (Key::H, Action::Find),
             (Key::P, Action::Print),
         ] {
+            if mac && key == Key::H {
+                continue;
+            }
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key)) {
                 self.execute(action, ctx);
                 return;
@@ -104,6 +117,14 @@ impl AlphaDocs {
             return;
         }
         if !canvas_focused {
+            if ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::Z)
+            }) {
+                if !self.session.viewing {
+                    self.execute(Action::Redo, ctx);
+                }
+                return;
+            }
             // Toolbar buttons must not swallow document commands. Editable title,
             // search and numeric fields retain their normal text shortcuts.
             for (key, action) in [
@@ -176,6 +197,10 @@ impl AlphaDocs {
                                 | Key::PageDown
                         ))
                     {
+                        continue;
+                    }
+                    if mac && self.mac_navigation(key, modifiers) {
+                        edited = true;
                         continue;
                     }
                     if cmd {
@@ -360,5 +385,75 @@ impl AlphaDocs {
             self.scroll_caret = true;
             ctx.request_repaint();
         }
+    }
+}
+
+impl AlphaDocs {
+    /// Mac Command arrows use measured visual lines/document bounds; Option
+    /// arrows and deletion use the engine's Unicode word boundaries.
+    fn mac_navigation(&mut self, key: Key, modifiers: egui::Modifiers) -> bool {
+        let cmd = modifiers.command;
+        let shift = modifiers.shift;
+        if cmd && matches!(key, Key::ArrowUp | Key::ArrowDown | Key::Home | Key::End) {
+            let addresses = self.session.editor.doc.addresses();
+            let end = matches!(key, Key::ArrowDown | Key::End);
+            let address = if end {
+                *addresses.last().expect("paragraph")
+            } else {
+                addresses[0]
+            };
+            let offset = if end {
+                self.session
+                    .editor
+                    .doc
+                    .paragraph(address)
+                    .expect("paragraph")
+                    .chars
+                    .len()
+            } else {
+                0
+            };
+            self.session
+                .editor
+                .place(Position { address, offset }, shift);
+            return true;
+        }
+        if cmd
+            && matches!(
+                key,
+                Key::ArrowLeft | Key::ArrowRight | Key::Backspace | Key::Delete
+            )
+        {
+            let end = matches!(key, Key::ArrowRight | Key::Delete);
+            if let Some(layout) = &self.layout {
+                let destination = layout.boundary(self.session.editor.caret, end);
+                if matches!(key, Key::Backspace | Key::Delete) {
+                    if !self.session.editor.selected() {
+                        self.session.editor.place(destination, true);
+                    }
+                    if self.session.editor.selected() {
+                        self.session.editor.delete(!end);
+                    }
+                } else {
+                    self.session.editor.place(destination, shift);
+                }
+            }
+            return true;
+        }
+        if modifiers.alt && !cmd {
+            match key {
+                Key::ArrowLeft | Key::ArrowRight => {
+                    self.session
+                        .editor
+                        .move_horizontal(key == Key::ArrowRight, shift, true)
+                }
+                Key::Backspace | Key::Delete => {
+                    self.session.editor.delete_word(key == Key::Backspace)
+                }
+                _ => return false,
+            }
+            return true;
+        }
+        false
     }
 }
