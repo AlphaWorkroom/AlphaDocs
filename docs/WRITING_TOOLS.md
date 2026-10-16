@@ -1,10 +1,10 @@
 # Page setup and writing tools
 
-AlphaDocs uses native Rust controls and measured document layout. The Google Docs screenshots are visual references; the application does not embed Google Docs or its cloud tools.
+AlphaDocs uses native Rust controls and measured document layout. Visual references inform layout; the application does not embed external cloud tools.
 
 ## Page setup
 
-File → Page setup offers Pages and Pageless. Pages has orientation, colour, four margins, and every preset shown in the supplied Google Docs menu: Letter, Tabloid, Legal, Statement, Executive, Folio, A3, A4, A5, ISO B4, ISO B5. Custom accepts physical sides from 1 to 200 inches, provided margins and columns leave usable space. B4/B5 are ISO dimensions, not the larger Japanese variants. Both orientations use the same measured pagination as PDF.
+File → Page setup offers Pages and Pageless. Pages has orientation, colour, four margins, and presets: Letter, Tabloid, Legal, Statement, Executive, Folio, A3, A4, A5, ISO B4, ISO B5. Custom accepts physical sides from 1 to 200 inches, provided margins and columns leave usable space. B4/B5 are ISO dimensions, not the larger Japanese variants. Both orientations use the same measured pagination as PDF.
 
 Apply to is whole-document scope across content tabs. Independent sections are not supported. Advanced retains columns, gap, editable repeated headers/footers and page numbers. Set as default saves geometry for new blank documents, omitting the current header/footer text. Cancel leaves the current document unchanged; applying settings is undoable. Page colours belong to the document and do not change with the workspace theme.
 

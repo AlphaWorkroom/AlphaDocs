@@ -1,12 +1,11 @@
 # AlphaDocs 0.1.3
 
-- All 11 Google Docs paper presets plus custom dimensions, with portrait/landscape measured layout and a redesigned Page setup. Pages/Pageless, saved defaults and the existing columns/running-text controls are included.
+- All 11 paper presets plus custom dimensions, with portrait/landscape measured layout and a redesigned Page setup. Pages/Pageless, saved defaults and the existing columns/running-text controls are included.
 - New native writing tools: manual basic citations/bibliography text, independent text comparison reports, body line numbers, personal dictionary controls, optional typing substitutions and online word lookup. Advanced tracked edits, verified signature requests and externally linked objects remain visibly disabled. [Full scope and limits](https://github.com/AlphaWorkroom/AlphaDocs/blob/main/docs/WRITING_TOOLS.md).
 - Translation stays hidden unless enabled in Preferences. Clicking Translate sends document text to MyMemory and creates a separate copy; the anonymous service has a 5,000-character daily quota. Inline styles, links and text annotations reset in the translated copy; source content remains intact.
 - Autosave now waits until editing has stopped for 30 seconds. A prominent Preferences card clearly enables/disables it; explicit Save, closing and switching still preserve work.
 - macOS uses native traffic lights in the integrated header. Large/double arrows use a bundled real font in the editor and PDF; recognised pasted arrow codes are repaired without changing literal code examples.
 - New matching update UI with download byte progress, cancellation, SHA-256 verification, saved-document handoff, platform installation and relaunch. Native browser links work again. Installed layouts and OS authorization requirements are described in [update notes](https://github.com/AlphaWorkroom/AlphaDocs/blob/main/docs/UPDATES.md).
-- The accidental EffectCraft source-project sentence has been removed from the README. No caches or user documents were deleted.
 
 Install this version once using the matching installer if your older app's download button does nothing. The new in-app installer flow applies to future updates from 0.1.3 onward. macOS apps remain ad-hoc signed and **not Apple-notarised**; the updater does not bypass Gatekeeper. Native CI and isolated installer smoke checks are not a claim of physical Mac appearance, assistive-hardware testing or a security audit.
 
