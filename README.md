@@ -9,11 +9,11 @@ Built with Rust · AI-Free editing · Offline documents
 
 ## See it in action
 
-[![Watch the AlphaDocs interaction trailer](screenshots/interaction-preview.gif)](screenshots/AlphaDocs-Interaction-10s.mp4)
+[![Watch the AlphaDocs 30-second trailer](screenshots/alphadocs-30s-preview.gif)](screenshots/AlphaDocs-30s.mp4)
 
-[Watch the 10-second trailer with sound](screenshots/AlphaDocs-Interaction-10s.mp4) · 1080p / 60 fps MP4. Follow the cursor through real chapter tabs, open documents and direct LAN/VPN sharing, with camera close-ups, click feedback, snapping panels and original click/swish/snap sound design. The GIF above is a silent preview.
+[Watch the 30-second trailer with sound](screenshots/AlphaDocs-30s.mp4) · 1080p / 60 fps MP4. Follow the cursor through real chapter tabs, open documents, direct LAN/VPN sharing and a switch into dark mode. Smooth camera close-ups, click feedback and snapping panels now have longer pauses for reading, with original music and click/swish/snap sound design. The GIF above is a silent preview.
 
-The [editable EffectCraft project](promo/AlphaDocs-Interaction-10s) includes the source captures, tracked vector cursor, native camera/keyframes, fonts and four separate sound stems.
+The [editable EffectCraft project](promo/AlphaDocs-30s) includes the source captures, tracked vector cursor, native camera/keyframes, fonts and four separate sound stems.
 
 Try the editable examples: [the book](examples/documents/The%20Lighthouse%20Atlas.adocs), [the illustrated guide](examples/documents/Room%20for%20your%20ideas.adocs), or [the project brief](examples/documents/Studio%20launch%20brief.adocs). Download the raw `.adocs` file, then open it in AlphaDocs.
 
@@ -49,6 +49,10 @@ Give chapters their own content tabs inside a single document. Keep character no
 Use your own type, colour and spacing. Add an editable table for a project plan, or combine headings, text and pictures in an illustrated guide.
 
 ![A formatted project brief with milestones and a native editable table](screenshots/brief.png)
+
+### Tired eyes? Switch to dark mode!
+
+Choose Light, Dark or your operating system's appearance in Preferences. Keep the same document, tools and layout while changing the workspace theme.
 
 ### Crop to Transparency
 
