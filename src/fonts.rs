@@ -8,6 +8,7 @@ use std::{
 
 pub const FONTS: &[(&str, &[u8])] = &[
     ("Emoji", include_bytes!("../assets/fonts/NotoEmoji.ttf")),
+    ("Math", include_bytes!("../assets/fonts/NotoSansMath.ttf")),
     (
         "Mono",
         include_bytes!("../assets/fonts/NotoSansMono-Regular.ttf"),
@@ -134,6 +135,9 @@ fn query(s: &TextStyle) -> Option<fontdb::ID> {
         })
 }
 pub fn key(s: &TextStyle) -> String {
+    if s.font == "Noto Sans Math" {
+        return "Math".into();
+    }
     if s.font == "Noto Emoji" {
         return "Emoji".into();
     }
@@ -162,17 +166,25 @@ pub fn symbol_key(s: &TextStyle, ch: char) -> String {
     coverage
         .entry((primary.clone(), ch))
         .or_insert_with(|| {
-            let fallback = if s.bold { "Mono-Bold" } else { "Mono" };
-            if !has_glyph(&face(s), ch)
-                && FONTS
-                    .iter()
-                    .find(|(name, _)| *name == fallback)
-                    .is_some_and(|(_, bytes)| has_glyph(&FontData::from_static(bytes), ch))
-            {
-                fallback.into()
-            } else {
-                primary
+            if has_glyph(&face(s), ch) {
+                return primary;
             }
+            let mono = if s.bold { "Mono-Bold" } else { "Mono" };
+            if FONTS
+                .iter()
+                .find(|(name, _)| *name == mono)
+                .is_some_and(|(_, bytes)| has_glyph(&FontData::from_static(bytes), ch))
+            {
+                return mono.into();
+            }
+            if FONTS
+                .iter()
+                .find(|(name, _)| *name == "Math")
+                .is_some_and(|(_, bytes)| has_glyph(&FontData::from_static(bytes), ch))
+            {
+                return "Math".into();
+            }
+            primary
         })
         .clone()
 }
@@ -185,11 +197,11 @@ fn has_glyph(data: &FontData, ch: char) -> bool {
     let mut buffer = harfrust::UnicodeBuffer::new();
     buffer.push_str(ch.encode_utf8(&mut [0; 4]));
     buffer.guess_segment_properties();
-    shaper
+    let glyphs = shaper
         .shape(buffer, harfrust::ShapeOptions::new())
         .glyph_infos()
-        .iter()
-        .all(|g| g.glyph_id != 0)
+        .to_vec();
+    !glyphs.is_empty() && glyphs.iter().all(|g| g.glyph_id != 0)
 }
 
 /// Actual bundled-face advance, in points, for fitting pasted text diagrams.
@@ -262,19 +274,22 @@ fn definitions() -> FontDefinitions {
         definitions
             .font_data
             .insert((*name).into(), FontData::from_static(bytes).into());
-        definitions.families.insert(
-            FontFamily::Name((*name).into()),
-            vec![
-                (*name).into(),
+        let mut family = vec![(*name).into()];
+        if *name != "Math" {
+            family.push(
                 if name.ends_with("Bold") || name.ends_with("BoldItalic") {
                     "Mono-Bold"
                 } else {
                     "Mono"
                 }
                 .into(),
-                "NotoEmoji-Regular".into(),
-            ],
-        );
+            );
+            family.push("Math".into());
+        }
+        family.push("NotoEmoji-Regular".into());
+        definitions
+            .families
+            .insert(FontFamily::Name((*name).into()), family);
     }
     let ui_style = TextStyle {
         font: preferred_body_family().into(),
@@ -291,6 +306,7 @@ fn definitions() -> FontDefinitions {
             ui_key.clone(),
             "Sans".into(),
             "Mono".into(),
+            "Math".into(),
             "NotoEmoji-Regular".into(),
         ],
     );
@@ -355,6 +371,7 @@ pub fn prepare(ctx: &Context, doc: &Document, typing: &TextStyle) -> bool {
                     name,
                     "Sans".into(),
                     if style.bold { "Mono-Bold" } else { "Mono" }.into(),
+                    "Math".into(),
                     "NotoEmoji-Regular".into(),
                 ],
             );
@@ -381,10 +398,13 @@ mod tests {
             };
             for ch in (0x2500..=0x257f)
                 .filter_map(char::from_u32)
-                .chain("→←↑↓↔⇒⇐".chars())
+                .chain("→←↑↓↔⇒⇐⇔⟵⟶⟷⟸⟹⟺".chars())
             {
                 let resolved = symbol_key(&style, ch);
-                assert!(resolved.starts_with("Mono"), "{ch} {resolved}");
+                assert!(
+                    resolved.starts_with("Mono") || resolved == "Math",
+                    "{ch} {resolved}"
+                );
                 let (_, bytes) = FONTS.iter().find(|(name, _)| *name == resolved).unwrap();
                 assert!(has_glyph(&FontData::from_static(bytes), ch), "{ch}");
             }
@@ -397,7 +417,7 @@ mod tests {
                 // epaint's has_glyph reports false when a real fallback glyph shares
                 // the replacement glyph's face. Compare actual raster atlas regions.
                 let g = fonts.layout_no_wrap(
-                    "┌─┐│├┤└┘→←↑↓↔\u{10ffff}".into(),
+                    "┌─┐│├┤└┘→←↑↓↔⟵⟶⟷⟸⟹⟺\u{10ffff}".into(),
                     family,
                     eframe::egui::Color32::BLACK,
                 );

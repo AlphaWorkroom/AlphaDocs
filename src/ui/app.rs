@@ -47,6 +47,7 @@ use eframe::egui::{
 };
 use std::{
     collections::HashMap,
+    ffi::{OsStr, OsString},
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -126,6 +127,7 @@ pub struct AlphaDocs {
     starred_only: bool,
     sort_title: bool,
     last_autosave: Instant,
+    last_local_edit: Instant,
     last_history: Instant,
     status: String,
     dialog: Option<Dialog>,
@@ -202,6 +204,10 @@ pub struct AlphaDocs {
     sharing: sharing::ShareState,
     update_state: updating::UpdateState,
     tools: tools::Tools,
+    #[cfg(test)]
+    autosave_test_now: Option<Instant>,
+    #[cfg(test)]
+    autosave_test_saves: usize,
 }
 #[derive(Default)]
 struct DocumentContentCache {
@@ -213,6 +219,8 @@ struct DocumentContentCache {
 }
 impl AlphaDocs {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+        let (document_path, update_error_log) = startup_arguments(&args);
         let migration = persistence::migrate_previous_installation();
         fonts::install(&cc.egui_ctx);
         let mut app = Self::fresh(
@@ -221,14 +229,25 @@ impl AlphaDocs {
             persistence::recent(),
         );
         app.restore_session();
-        if let Some(path) = std::env::args_os().nth(1) {
-            app.open_path(PathBuf::from(path));
+        if let Some(path) = document_path {
+            app.open_path(path);
         }
         if let Err(error) = migration {
             app.message = format!(
                 "Previous library import is incomplete. Original files were retained.\n\n{error}"
             );
             app.status = "Previous library import needs attention".into();
+            app.dialog = Some(Dialog::Message);
+        }
+        if let Some(log) = update_error_log
+            .as_deref()
+            .and_then(|path| validated_update_log(&persistence::data_dir(), path))
+        {
+            app.message = format!(
+                "The update could not be installed. Your previous app has reopened, and your documents are still available.\n\nUpdate log: {}",
+                log.display()
+            );
+            app.status = "Update could not be installed".into();
             app.dialog = Some(Dialog::Message);
         }
         app.check_updates(&cc.egui_ctx, false);
@@ -253,6 +272,7 @@ impl AlphaDocs {
             starred_only: false,
             sort_title: false,
             last_autosave: Instant::now(),
+            last_local_edit: Instant::now(),
             last_history: Instant::now(),
             status: "All changes saved locally".into(),
             dialog: None,
@@ -328,6 +348,10 @@ impl AlphaDocs {
             sharing: sharing::ShareState::default(),
             update_state: Default::default(),
             tools: Default::default(),
+            #[cfg(test)]
+            autosave_test_now: None,
+            #[cfg(test)]
+            autosave_test_saves: 0,
             view_tab_id: "tab-1".into(),
         }
     }
@@ -396,7 +420,57 @@ impl AlphaDocs {
         self.session.viewing = false;
         self.status = "Opened locally".into();
         self.last_autosave = Instant::now();
+        self.last_local_edit = self.autosave_now();
         self.persist_session();
+    }
+    fn autosave_now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(now) = self.autosave_test_now {
+            return now;
+        }
+        Instant::now()
+    }
+    fn autosave_revision(&self) -> (String, String, usize, u64) {
+        let doc = &self.session.editor.doc;
+        (
+            doc.id.clone(),
+            doc.tabs[doc.active_tab].id.clone(),
+            doc.tabs.len(),
+            self.session.editor.revision,
+        )
+    }
+    fn local_revision_changed(
+        before: &(String, String, usize, u64),
+        after: &(String, String, usize, u64),
+    ) -> bool {
+        if before.0 != after.0 {
+            return false;
+        }
+        if before.3 == after.3 {
+            return false;
+        }
+        // Editor::switch_tab increments revision for its saved selection. It is
+        // navigation, not an edit, when exactly that one transition occurred.
+        !(before.1 != after.1 && before.2 == after.2 && after.3 == before.3.saturating_add(1))
+    }
+    fn autosave_due(&self, now: Instant) -> bool {
+        !self.home
+            && self.prefs.autosave
+            && self.session.editor.revision != self.session.saved_library_revision
+            && self.ime_preedit.is_empty()
+            && now.saturating_duration_since(self.last_local_edit) >= Duration::from_secs(30)
+            && now.saturating_duration_since(self.last_autosave) >= Duration::from_secs(2)
+    }
+    fn save_autosave(&mut self, now: Instant) {
+        #[cfg(test)]
+        if self.autosave_test_now.is_some() {
+            self.autosave_test_saves += 1;
+            self.session.saved_library_revision = self.session.editor.revision;
+            self.last_autosave = now;
+            return;
+        }
+        self.flush();
+        self.last_autosave = now;
     }
     fn reset_document_view(&mut self) {
         self.proof_state = None;
@@ -991,7 +1065,7 @@ impl AlphaDocs {
                                         | "Opened locally"
                                 ) {
                                 if self.prefs.autosave {
-                                    "Changes pending autosave"
+                                    "Waiting for 30 seconds of idle time"
                                 } else {
                                     "Unsaved changes · Autosave off"
                                 }
@@ -1855,6 +1929,43 @@ impl AlphaDocs {
             ui.close();
         }
     }
+}
+
+/// Interpret the one supported startup handoff without allowing its log path to
+/// fall through to document opening. Other arguments retain the normal file-open behavior.
+fn startup_arguments(args: &[OsString]) -> (Option<PathBuf>, Option<PathBuf>) {
+    if args
+        .first()
+        .is_some_and(|arg| arg == OsStr::new("--update-error"))
+    {
+        let log = (args.len() == 2).then(|| PathBuf::from(&args[1]));
+        return (None, log);
+    }
+    (args.first().cloned().map(PathBuf::from), None)
+}
+
+fn validated_update_log(
+    data_dir: &std::path::Path,
+    candidate: &std::path::Path,
+) -> Option<PathBuf> {
+    let data_dir = std::fs::canonicalize(data_dir).ok()?;
+    let updates_path = data_dir.join("updates");
+    let updates = std::fs::canonicalize(&updates_path).ok()?;
+    // Do not accept a substituted updates directory that resolves elsewhere.
+    if !is_canonical_update_root(&data_dir, &updates) {
+        return None;
+    }
+    let log = std::fs::canonicalize(candidate).ok()?;
+    let metadata = std::fs::metadata(&log).ok()?;
+    (metadata.is_file() && is_canonical_update_log(&updates, &log)).then_some(log)
+}
+
+fn is_canonical_update_log(updates_dir: &std::path::Path, log: &std::path::Path) -> bool {
+    log != updates_dir && log.starts_with(updates_dir)
+}
+
+fn is_canonical_update_root(data_dir: &std::path::Path, updates_dir: &std::path::Path) -> bool {
+    updates_dir == data_dir.join("updates")
 }
 
 impl AlphaDocs {
@@ -3150,10 +3261,19 @@ fn template(kind: usize) -> Document {
 
 impl AlphaDocs {
     fn update_ui(&mut self, ui: &mut Ui) {
+        if self.update_state.busy() {
+            self.poll_sharing(ui.ctx());
+            self.poll_updates(ui.ctx());
+            self.updating_screen(ui);
+            return;
+        }
         self.poll_tools(ui.ctx());
         self.poll_updates(ui.ctx());
         self.poll_export(ui.ctx());
         self.poll_sharing(ui.ctx());
+        // Collaboration projection is remote work. Track only later revisions as
+        // local edits so remote changes stay recoverable without moving the idle timer.
+        let revision_before_local_ui = self.autosave_revision();
         self.poll_paste(ui.ctx());
         let ctx = ui.ctx().clone();
         if ctx.os() == egui::os::OperatingSystem::Mac
@@ -3180,6 +3300,9 @@ impl AlphaDocs {
             self.open_feature_search();
         }
         if self.prepare_fonts(&ctx) {
+            if Self::local_revision_changed(&revision_before_local_ui, &self.autosave_revision()) {
+                self.last_local_edit = self.autosave_now();
+            }
             self.layout_revision = u64::MAX;
             ctx.request_discard("Register document fonts");
             return;
@@ -3252,25 +3375,34 @@ impl AlphaDocs {
         if self.refocus && self.dialog.is_none() {
             ctx.request_repaint();
         }
-        if !self.home
-            && self.prefs.autosave
-            && self.session.editor.revision != self.session.saved_library_revision
-            && self.last_autosave.elapsed() > Duration::from_secs(2)
-        {
-            self.flush();
-            self.last_autosave = Instant::now();
-            if self.last_history.elapsed() > Duration::from_secs(60) {
+        let now = self.autosave_now();
+        if Self::local_revision_changed(&revision_before_local_ui, &self.autosave_revision()) {
+            self.last_local_edit = now;
+        }
+        if self.autosave_due(now) {
+            self.save_autosave(now);
+            #[cfg(not(test))]
+            if now.saturating_duration_since(self.last_history) > Duration::from_secs(60) {
                 if let Err(e) = persistence::snapshot(&self.session.editor.doc) {
                     self.status = e;
                 }
-                self.last_history = Instant::now();
+                self.last_history = now;
             }
         }
         if !self.home
             && self.prefs.autosave
             && self.session.editor.revision != self.session.saved_library_revision
         {
-            ctx.request_repaint_after(Duration::from_secs(2));
+            let idle_left = Duration::from_secs(30)
+                .saturating_sub(now.saturating_duration_since(self.last_local_edit));
+            let retry_left = Duration::from_secs(2)
+                .saturating_sub(now.saturating_duration_since(self.last_autosave));
+            let delay = if self.ime_preedit.is_empty() {
+                idle_left.max(retry_left).max(Duration::from_millis(1))
+            } else {
+                Duration::from_secs(1)
+            };
+            ctx.request_repaint_after(delay);
         }
         if ctx.input(|i| i.viewport().close_requested()) {
             if let Some(job) = &mut self.export_job {
@@ -3300,12 +3432,23 @@ impl eframe::App for AlphaDocs {
         self.update_ui(ui);
     }
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
-        if self.prefs.autosave
-            && let Err(e) = self.tabs.save_all(&mut self.session)
-        {
-            self.status = e;
+        let now = self.autosave_now();
+        if self.autosave_due(now) {
+            #[cfg(test)]
+            if self.autosave_test_now.is_some() {
+                self.save_autosave(now);
+            } else {
+                if let Err(e) = self.tabs.save_all(&mut self.session) {
+                    self.status = e;
+                }
+            }
+            #[cfg(not(test))]
+            if let Err(e) = self.tabs.save_all(&mut self.session) {
+                self.status = e;
+            }
         }
         self.persist_session();
+        #[cfg(not(test))]
         let _ = persistence::save_preferences(&self.prefs);
     }
 }
@@ -3597,4 +3740,49 @@ fn icon_menu(ui: &mut Ui, icon: Icon, label: &str, content: impl FnOnce(&mut Ui)
     ));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     egui::Popup::menu(&response).show(content);
+}
+
+#[cfg(test)]
+mod update_error_startup_tests {
+    use super::{is_canonical_update_log, is_canonical_update_root, startup_arguments};
+    use std::{ffi::OsString, path::Path};
+
+    #[test]
+    fn update_error_handoff_is_never_opened_as_a_document() {
+        let args = [OsString::from("--update-error"), OsString::from("/tmp/log")];
+        let (document, log) = startup_arguments(&args);
+        assert!(document.is_none());
+        assert_eq!(log.as_deref(), Some(Path::new("/tmp/log")));
+
+        let malformed = [OsString::from("--update-error")];
+        assert_eq!(startup_arguments(&malformed), (None, None));
+    }
+
+    #[test]
+    fn only_canonical_files_below_updates_are_accepted() {
+        let data = Path::new("/profile");
+        let root = Path::new("/profile/updates");
+        assert!(is_canonical_update_root(data, root));
+        assert!(!is_canonical_update_root(
+            data,
+            Path::new("/shared/updates")
+        ));
+        assert!(is_canonical_update_log(
+            root,
+            Path::new("/profile/updates/install.log")
+        ));
+        assert!(is_canonical_update_log(
+            root,
+            Path::new("/profile/updates/session/install.log")
+        ));
+        assert!(!is_canonical_update_log(root, root));
+        assert!(!is_canonical_update_log(
+            root,
+            Path::new("/profile/updates-elsewhere/install.log")
+        ));
+        assert!(!is_canonical_update_log(
+            root,
+            Path::new("/profile/documents/report.log")
+        ));
+    }
 }

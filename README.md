@@ -13,7 +13,6 @@ Built with Rust · AI-Free editing · Offline documents
 
 [Watch the 30-second trailer with sound](screenshots/AlphaDocs-30s.mp4) · 1080p / 60 fps MP4. Follow the cursor through real chapter tabs, open documents, direct LAN/VPN sharing and a switch into dark mode. Smooth camera close-ups, click feedback and snapping panels now have longer pauses for reading, with original music and click/swish/snap sound design. The GIF above is a silent preview.
 
-The [editable EffectCraft project](promo/AlphaDocs-30s) includes the source captures, tracked vector cursor, native camera/keyframes, fonts and four separate sound stems.
 
 Try the editable examples: [the book](examples/documents/The%20Lighthouse%20Atlas.adocs), [the illustrated guide](examples/documents/Room%20for%20your%20ideas.adocs), or [the project brief](examples/documents/Studio%20launch%20brief.adocs). Download the raw `.adocs` file, then open it in AlphaDocs.
 
@@ -70,7 +69,7 @@ Sharing currently needs a reachable **LAN or VPN**, and the host must keep Alpha
 
 ### Your documents stay yours.
 
-Write and edit completely offline, without relying on cloud services, an account or an AI writing service. Native **`.adocs`** files retain editable formatting, content tabs, original pictures and local annotations. Local autosave is optional; Save and version history keep work on your computer.
+Write and edit completely offline, without relying on cloud services, an account or an AI writing service. Native **`.adocs`** files retain editable formatting, content tabs, original pictures and local annotations. Local autosave is optional and waits for 30 seconds without editing; Save and version history keep work on your computer.
 
 ### Familiar tools, native performance.
 
@@ -86,7 +85,7 @@ Write and edit completely offline, without relying on cloud services, an account
 
 [Full changelog](CHANGELOG.md) · [Writing tools and online-service limits](docs/WRITING_TOOLS.md).
 
-Document editing needs no connection. Public GitHub update checks are enabled by default, run at most once a day and can be disabled in Preferences. **Help → Check for updates** checks manually. Update checks request release metadata only. Online dictionary lookup sends just the searched word; document translation is hidden unless enabled in Preferences and sends text only when you click Translate. Updates are offered as a matching GitHub download and are installed when you choose to run the installer.
+Document editing needs no connection. Public GitHub update checks are enabled by default, run at most once a day and can be disabled in Preferences. **Help → Check for updates** checks manually. Update checks request release metadata only. Online dictionary lookup sends just the searched word; document translation is hidden unless enabled in Preferences and sends text only when you click Translate. From 0.1.3 onward, Download and install shows byte progress while downloading, saves open work, verifies the installer and restarts the updated app. Windows keeps a helper window visible during installation; macOS and Linux close AlphaDocs while a background helper installs, then reopen it (the OS may show an authorization prompt). Unsupported portable locations show a manual-download route. Older versions need this installer once to gain the new updater. See [update and recovery details](docs/UPDATES.md).
 
 ## Compatibility
 

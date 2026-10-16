@@ -1,6 +1,6 @@
 [package]
 name = "alphadocs"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "AlphaDocs by Alpha Workroom — native document editor"
 authors = ["Alpha Workroom"]
@@ -10,7 +10,7 @@ license-file = "LICENSE"
 collaboration-preview = []
 
 [dependencies]
-eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "persistence", "accesskit"] }
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "persistence", "accesskit", "links"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 unicode-segmentation = "1.12"
@@ -40,6 +40,8 @@ rand = { version = "0.9" }
 subtle = { version = "2" }
 socket2 = "=0.6.5"
 semver = "1"
+sha2 = "0.10"
+url = "2"
 
 [target.'cfg(windows)'.dependencies]
 winprint = { version = "0.2.1", default-features = false }

@@ -16,6 +16,7 @@ pub mod printing;
 pub mod proofing;
 pub mod session;
 pub mod ui;
+pub mod updater;
 pub mod updates;
 
 pub mod writing;

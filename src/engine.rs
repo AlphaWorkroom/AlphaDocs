@@ -797,6 +797,19 @@ impl Editor {
 }
 
 fn snapshot_weight(snapshot: &Snapshot) -> usize {
+    let citation_weight = |citations: &SharedVec<crate::writing::Citation>| {
+        citations.capacity() * std::mem::size_of::<crate::writing::Citation>()
+            + citations
+                .iter()
+                .map(|citation| {
+                    citation.author.capacity()
+                        + citation.title.capacity()
+                        + citation.year.capacity()
+                        + citation.publisher.capacity()
+                        + citation.url.capacity()
+                })
+                .sum::<usize>()
+    };
     let paragraph = |p: &Paragraph| {
         p.chars.len() * (std::mem::size_of::<StyledChar>() + 24)
             + p.annotations
@@ -817,7 +830,7 @@ fn snapshot_weight(snapshot: &Snapshot) -> usize {
     } else {
         snapshot.blocks.iter().collect()
     };
-    blocks
+    let block_weight = blocks
         .into_iter()
         .map(|b| match b {
             Block::Paragraph(p) => paragraph(p),
@@ -832,12 +845,50 @@ fn snapshot_weight(snapshot: &Snapshot) -> usize {
             }
             _ => 0,
         })
-        .sum()
+        .sum::<usize>();
+    let citations = snapshot
+        .full_document
+        .as_ref()
+        .map(|doc| &doc.citations)
+        .or(snapshot.citations.as_ref());
+    block_weight + citations.map_or(0, citation_weight)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn citation_snapshot_payload_counts_toward_history_budget() {
+        let mut doc = Document::new("Citation history");
+        let oversized_url = "x".repeat(64 * 1024 * 1024 + 1);
+        doc.citations = vec![crate::writing::Citation {
+            url: oversized_url,
+            ..Default::default()
+        }]
+        .into();
+        let citation_only = Snapshot {
+            tab_id: doc.tabs[0].id.clone(),
+            full_document: None,
+            start: 0,
+            replace_len: 0,
+            blocks: vec![],
+            page: None,
+            citations: Some(doc.citations.clone()),
+            title: None,
+            starred: None,
+            caret: Position::default(),
+            anchor: Position::default(),
+        };
+        assert!(snapshot_weight(&citation_only) > 64 * 1024 * 1024);
+
+        let full_document = Snapshot {
+            full_document: Some(doc.clone()),
+            citations: None,
+            ..citation_only
+        };
+        assert!(snapshot_weight(&full_document) > 64 * 1024 * 1024);
+    }
+
     #[test]
     fn content_tabs_preserve_selection_and_history_across_navigation_and_management() {
         let mut e = Editor::new(Document::new("One file"));

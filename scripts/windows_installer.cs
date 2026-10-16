@@ -18,7 +18,11 @@ internal sealed class Setup : Form {
     readonly CheckBox desktop = new CheckBox();
     readonly CheckBox associate = new CheckBox();
     readonly Label status = new Label();
-    readonly string destination = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "AlphaDocs");
+    readonly string destination;
+    readonly bool verificationMode;
+    readonly string verificationDataDirectory;
+    string previousInstall;
+    bool destinationValidated;
     bool installing;
     bool completed;
 
@@ -30,11 +34,27 @@ internal sealed class Setup : Form {
             Extract(args[1]);
             return;
         }
+        if (args.Length == 2 && args[0] == "--verify-update") {
+            VerifyUpdate(args[1]);
+            return;
+        }
+        if ((args.Length == 3 || (args.Length == 4 && args[3] == "--dark")) && args[0] == "--update") {
+            int pid;
+            if (!Int32.TryParse(args[1], out pid) || pid <= 0) throw new ArgumentException("Invalid AlphaDocs process identifier.");
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new UpdateWindow(pid, args[2], args.Length == 4));
+            return;
+        }
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new Setup());
     }
-    Setup() {
+    internal Setup() : this(null, false) { }
+    internal Setup(string verificationDestination, bool isVerification) {
+        destination = verificationDestination ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "AlphaDocs");
+        verificationMode = isVerification;
+        verificationDataDirectory = isVerification ? destination + ".profile" : null;
         Text = "Install AlphaDocs by Alpha Workroom";
         ClientSize = new Size(680, 590);
         StartPosition = FormStartPosition.CenterScreen;
@@ -93,9 +113,11 @@ internal sealed class Setup : Form {
             }
         }
     }
-    void Install(bool desktopShortcut, bool association) {
+    string Install(bool desktopShortcut, bool association) {
+        destinationValidated = false;
         var stage = destination + ".install-" + Guid.NewGuid().ToString("N");
         Extract(stage);
+        ValidateForInstall(Path.Combine(stage, "AlphaDocs.exe"));
         // Retain a previous installation rather than recursively deleting it.
         string previous = null;
         if (Directory.Exists(destination)) {
@@ -104,6 +126,7 @@ internal sealed class Setup : Form {
                 catch (System.ComponentModel.Win32Exception) { }
             }
             previous = destination + ".previous-" + Guid.NewGuid().ToString("N");
+            previousInstall = previous;
             Directory.Move(destination, previous);
         }
         try { Directory.Move(stage, destination); }
@@ -112,15 +135,82 @@ internal sealed class Setup : Form {
             throw;
         }
         var exe = Path.Combine(destination, "AlphaDocs.exe");
-        var start = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "AlphaDocs.lnk");
-        Shortcut(start, exe);
-        if (desktopShortcut) Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "AlphaDocs.lnk"), exe);
-        if (association) {
-            using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\AlphaDocs.Document")) key.SetValue("", "AlphaDocs document");
-            using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\AlphaDocs.Document\DefaultIcon")) key.SetValue("", "\"" + exe + "\",0");
-            using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\AlphaDocs.Document\shell\open\command")) key.SetValue("", "\"" + exe + "\" \"%1\"");
-            using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\.adocs\OpenWithProgids")) key.SetValue("AlphaDocs.Document", "");
+        try { ValidateForInstall(exe); }
+        catch {
+            var failed = destination + ".failed-" + Guid.NewGuid().ToString("N");
+            Directory.Move(destination, failed);
+            if (previous != null) Directory.Move(previous, destination);
+            throw;
         }
+        destinationValidated = true;
+        if (!verificationMode) {
+            var start = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "AlphaDocs.lnk");
+            Shortcut(start, exe);
+            if (desktopShortcut) Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "AlphaDocs.lnk"), exe);
+            if (association) {
+                using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\AlphaDocs.Document")) key.SetValue("", "AlphaDocs document");
+                using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\AlphaDocs.Document\DefaultIcon")) key.SetValue("", "\"" + exe + "\",0");
+                using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\AlphaDocs.Document\shell\open\command")) key.SetValue("", "\"" + exe + "\" \"%1\"");
+                using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\.adocs\OpenWithProgids")) key.SetValue("AlphaDocs.Document", "");
+            }
+        }
+        return previous;
+    }
+    static void VerifyUpdate(string requestedDestination) {
+        var destination = Path.GetFullPath(requestedDestination);
+        if (Directory.Exists(destination) || File.Exists(destination))
+            throw new IOException("Update verification target must be a new, empty path.");
+        var parent = Path.GetDirectoryName(destination);
+        var temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (String.IsNullOrEmpty(parent) || !String.Equals(Path.GetFullPath(parent), temp, StringComparison.OrdinalIgnoreCase) || !Directory.Exists(parent))
+            throw new IOException("Update verification target must be a new direct child of the current user's temporary folder.");
+        Extract(destination); // seed the isolated destination with the packaged old payload
+        var setup = new Setup(destination, true);
+        Directory.CreateDirectory(setup.verificationDataDirectory);
+        var backup = setup.Install(false, false);
+        if (String.IsNullOrEmpty(backup) || !File.Exists(Path.Combine(backup, "AlphaDocs.exe")))
+            throw new IOException("Update verification did not retain the previous payload.");
+        ValidatePayload(Path.Combine(backup, "AlphaDocs.exe"), setup.verificationDataDirectory);
+        ValidatePayload(Path.Combine(destination, "AlphaDocs.exe"), setup.verificationDataDirectory);
+    }
+    void ValidateForInstall(string exe) { ValidatePayload(exe, verificationDataDirectory); }
+    static void ValidatePayload(string exe, string dataDirectory = null) {
+        var start = new ProcessStartInfo(exe, "--self-check") { UseShellExecute = false, CreateNoWindow = true };
+        if (dataDirectory != null) {
+            Directory.CreateDirectory(dataDirectory);
+            start.EnvironmentVariables["ALPHADOCS_DATA_DIR"] = dataDirectory;
+        }
+        using (var process = Process.Start(start)) {
+            if (process == null) throw new IOException("Could not start the staged AlphaDocs self-check.");
+            if (!process.WaitForExit(120000)) {
+                try { process.Kill(); } catch { }
+                try { process.WaitForExit(); } catch { }
+                throw new IOException("The staged AlphaDocs executable timed out during its native self-check.");
+            }
+            if (process.ExitCode != 0) throw new IOException("The staged AlphaDocs executable failed its native self-check.");
+        }
+    }
+    internal void Update(int oldPid, string log) {
+        AppendLog(log, "Waiting for AlphaDocs process " + oldPid + " to close.");
+        try {
+            using (var process = Process.GetProcessById(oldPid))
+                if (!process.WaitForExit(300000)) throw new IOException("AlphaDocs did not close in time.");
+        } catch (ArgumentException) { /* The application exited before this helper started. */ }
+        AppendLog(log, "Validating and installing the verified update.");
+        Install(false, false);
+        AppendLog(log, "Installed update passed its native self-check.");
+        Process.Start(new ProcessStartInfo(Path.Combine(destination, "AlphaDocs.exe")) { UseShellExecute = true });
+    }
+    static void AppendLog(string path, string message) {
+        File.AppendAllText(path, DateTime.UtcNow.ToString("o") + " " + message + Environment.NewLine);
+    }
+    internal void RelaunchExisting(int oldPid) {
+        try { if (!Process.GetProcessById(oldPid).HasExited) return; }
+        catch (ArgumentException) { }
+        var exe = Path.Combine(destination, "AlphaDocs.exe");
+        var retained = previousInstall == null ? null : Path.Combine(previousInstall, "AlphaDocs.exe");
+        if ((!destinationValidated || !File.Exists(exe)) && retained != null && File.Exists(retained)) exe = retained;
+        if (File.Exists(exe)) Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
     }
     static void Shortcut(string path, string executable) {
         var shellType = Type.GetTypeFromProgID("WScript.Shell");
@@ -131,4 +221,90 @@ internal sealed class Setup : Form {
         type.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, link, new object[] { Path.GetDirectoryName(executable) });
         type.InvokeMember("Save", BindingFlags.InvokeMethod, null, link, null);
     }
+}
+internal sealed class UpdateWindow : Form {
+    readonly Setup setup;
+    readonly int oldPid;
+    readonly string log;
+    readonly Label status = new Label();
+    bool running;
+    public UpdateWindow(int pid, string logPath, bool dark) {
+        setup = new Setup();
+        oldPid = pid;
+        log = logPath;
+        var surface = dark ? Color.FromArgb(32,35,41) : Color.FromArgb(248,250,253);
+        var ink = dark ? Color.FromArgb(223,227,235) : Color.FromArgb(31,31,31);
+        var muted = dark ? Color.FromArgb(157,164,177) : Color.FromArgb(95,99,104);
+        var blue = dark ? Color.FromArgb(168,199,250) : Color.FromArgb(11,87,208);
+        Text = "AlphaDocs";
+        ClientSize = new Size(456, 244);
+        StartPosition = FormStartPosition.CenterScreen;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = MinimizeBox = false;
+        ControlBox = false;
+        BackColor = surface;
+        ForeColor = ink;
+        Font = new Font("Segoe UI", 10.5f);
+        Icon = Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location);
+        var mark = new PictureBox { Image = Icon.ToBitmap(), SizeMode = PictureBoxSizeMode.Zoom, BackColor = surface };
+        mark.SetBounds(24,24,32,36); Controls.Add(mark);
+        var title = new Label { Text = "Updating AlphaDocs", Font = new Font("Segoe UI",18f), AutoSize = false, BackColor = surface, ForeColor = ink };
+        title.SetBounds(70,26,362,36); Controls.Add(title);
+        var note = new Label { Text = "Your documents are saved and will reopen.", ForeColor = muted, BackColor = surface };
+        note.SetBounds(24,80,408,34); Controls.Add(note);
+        status.Text = "Waiting for AlphaDocs to close…";
+        status.BackColor = surface;
+        status.ForeColor = ink;
+        status.SetBounds(24,124,408,46); Controls.Add(status);
+        var rail = new UpdateRail(blue, dark ? Color.FromArgb(71,77,88) : Color.FromArgb(216,225,236));
+        rail.BackColor = surface; rail.SetBounds(24,184,408,8); Controls.Add(rail);
+        var footer = new Label { Text = "Installing locally. No documents are uploaded.", Font = new Font("Segoe UI",9f), ForeColor = muted, BackColor = surface };
+        footer.SetBounds(24,208,408,20); Controls.Add(footer);
+        FormClosing += delegate(object sender, FormClosingEventArgs e) { if (running) e.Cancel = true; };
+        Shown += async delegate {
+            if (running) return;
+            running = true;
+            try {
+                status.Text = "Verifying and installing your update…";
+                await Task.Run(delegate { setup.Update(oldPid, log); });
+                rail.Complete = true;
+                status.Text = "Update installed. AlphaDocs has restarted.";
+                await Task.Delay(800);
+                running = false;
+                Close();
+            } catch (Exception error) {
+                rail.Failed = true;
+                status.ForeColor = dark ? Color.FromArgb(255,180,171) : Color.FromArgb(179,38,30);
+                status.Text = "The update could not be installed.";
+                try { File.AppendAllText(log, DateTime.UtcNow.ToString("o") + " Update failed: " + error + Environment.NewLine); } catch { }
+                try { setup.RelaunchExisting(oldPid); } catch { }
+                MessageBox.Show(this, "The previous installation was retained where possible.\r\n\r\n" + error.Message, "AlphaDocs update", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                running = false;
+                Close();
+            }
+        };
+    }
+}
+internal sealed class UpdateRail : Control {
+    readonly Color accent;
+    readonly Color track;
+    readonly Timer clock = new Timer();
+    public bool Complete;
+    public bool Failed;
+    public UpdateRail(Color blue, Color background) {
+        accent = blue; track = background;
+        SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+        clock.Interval = 30; clock.Tick += delegate { Invalidate(); }; clock.Start();
+    }
+    protected override void OnPaint(PaintEventArgs e) {
+        base.OnPaint(e);
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var pen = new Pen(track,6f)) { pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round; e.Graphics.DrawLine(pen,3,Height/2,Width-3,Height/2); }
+        if (Failed) return;
+        var phase = (Environment.TickCount & Int32.MaxValue) % 1800 / 1800f;
+        var start = Complete ? 3f : phase * (Width+96) - 96;
+        var end = Complete ? Width-3f : start+96;
+        using (var pen = new Pen(accent,6f)) { pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round; e.Graphics.DrawLine(pen,start,Height/2,end,Height/2); }
+    }
+    protected override void Dispose(bool disposing) { if (disposing) clock.Dispose(); base.Dispose(disposing); }
 }

@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased — Page setup and writing tools
+## 0.1.3 — 16 October 2026
+
+### Focused fixes
+
+- Autosave waits for 30 seconds without local editing. Each edit restarts the wait; IME composition defers saving. Preferences has a dedicated On/Off Autosave card. Explicit Save, switching and closing retain their existing immediate-save behaviour.
+- macOS uses native AppKit traffic lights in the integrated header, with space reserved on the left. Windows/Linux keep their existing controls. Native Mac builds and simulated geometry checks are distinct from physical Mac visual testing.
+- The update dialog now downloads a platform installer, shows received/total bytes, verifies its declared size and GitHub SHA-256, and hands off installation/relaunch after saving all open documents. Editing is blocked during the download, with cancellation available. Canonical repository URLs and bounded trusted-host redirects are required; failed verification does not run an installer.
+- Windows per-user installations use a themed update helper and retain the old installation for recovery. macOS standard Applications bundles are staged, signature/self-check verified and swapped with a retained backup. Linux DEB installations use normal PackageKit/PolicyKit or pkexec/dpkg authorization; supported user-writable layouts swap validated files. Missing permission/tools or unsupported portable paths produce an explicit error and manual release link. Installation helpers retain failure logs and attempt to reopen the old application on failure; Linux package-database rollback is not claimed.
+- Restored native browser-link support, which was omitted from the prior build and caused the old download button to do nothing.
+- Removed the accidentally included EffectCraft-project sentence from the GitHub README.
+- Added real Noto Sans Math glyph fallback for long/double arrows in both editor and PDF, with exact OFL/source notices. Recognised pasted long-arrow names and numeric arrow references become their actual Unicode symbols. Literal code and unrelated entities stay intact; existing document text is not bulk-rewritten.
+- Cache audit is reported separately; no development caches or documents were deleted.
+
+### Page setup and writing tools
 
 - Page setup follows the supplied Pages/Pageless reference, with whole-document scope, page colour, four margin fields, an Advanced section and saved defaults for new documents. Defaults never copy document header/footer text.
 - All 11 Google Docs paper presets are available: Letter, Tabloid, Legal, Statement, Executive, Folio, A3, A4, A5, ISO B4 and ISO B5. Custom dimensions accept 1–200 inches per side, subject to usable margin/column space. Both orientations use measured layout; native files and DOCX retain dimensions.

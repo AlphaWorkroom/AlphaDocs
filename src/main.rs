@@ -25,12 +25,20 @@ fn main() -> eframe::Result {
         );
         return Ok(());
     }
+    let viewport = eframe::egui::ViewportBuilder::default()
+        .with_inner_size([1440.0, 960.0])
+        .with_min_inner_size([960.0, 640.0])
+        .with_icon(std::sync::Arc::new(app_icon()));
+    #[cfg(target_os = "macos")]
+    let viewport = viewport
+        .with_decorations(true)
+        .with_fullsize_content_view(true)
+        .with_title_shown(false)
+        .with_titlebar_shown(false);
+    #[cfg(not(target_os = "macos"))]
+    let viewport = viewport.with_decorations(false);
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_decorations(false)
-            .with_inner_size([1440.0, 960.0])
-            .with_min_inner_size([960.0, 640.0])
-            .with_icon(std::sync::Arc::new(app_icon())),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(

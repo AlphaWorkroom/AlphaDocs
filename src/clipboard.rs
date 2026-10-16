@@ -40,7 +40,22 @@ fn arrow_entities(text: &str, endings: &[char]) -> String {
         ("leftrightarrow", "↔"),
         ("harr", "↔"),
         ("Rightarrow", "⇒"),
+        ("rArr", "⇒"),
         ("Leftarrow", "⇐"),
+        ("lArr", "⇐"),
+        ("hArr", "⇔"),
+        ("longrightarrow", "⟶"),
+        ("longleftarrow", "⟵"),
+        ("longleftrightarrow", "⟷"),
+        ("LongLeftArrow", "⟵"),
+        ("LongRightArrow", "⟶"),
+        ("LongLeftRightArrow", "⟷"),
+        ("DoubleLongLeftArrow", "⟸"),
+        ("DoubleLongRightArrow", "⟹"),
+        ("DoubleLongLeftRightArrow", "⟺"),
+        ("Longrightarrow", "⟹"),
+        ("Longleftarrow", "⟸"),
+        ("Longleftrightarrow", "⟺"),
     ] {
         for ending in endings {
             let entity = format!("&{name}{ending}");
@@ -49,7 +64,70 @@ fn arrow_entities(text: &str, endings: &[char]) -> String {
             }
         }
     }
-    result
+    numeric_arrow_entities(&result)
+}
+/// Plain-text paste bypasses HTML's entity decoder. Decode only the arrow
+/// references the paste repair supports, leaving arbitrary entities untouched.
+fn numeric_arrow_entities(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut output = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'&' && bytes.get(i + 1) == Some(&b'#') {
+            let mut end = i + 2;
+            let radix = if matches!(bytes.get(end), Some(b'x' | b'X')) {
+                end += 1;
+                16
+            } else {
+                10
+            };
+            let digits = end;
+            while bytes.get(end).is_some_and(|byte| match radix {
+                16 => byte.is_ascii_hexdigit(),
+                _ => byte.is_ascii_digit(),
+            }) {
+                end += 1;
+            }
+            let boundary = bytes
+                .get(end)
+                .is_none_or(|byte| matches!(byte, b';' | b'&'));
+            if end > digits && boundary {
+                let code = std::str::from_utf8(&bytes[digits..end])
+                    .ok()
+                    .and_then(|digits| u32::from_str_radix(digits, radix).ok());
+                let arrow = match code {
+                    Some(0x2190) => Some('←'),
+                    Some(0x2191) => Some('↑'),
+                    Some(0x2192) => Some('→'),
+                    Some(0x2193) => Some('↓'),
+                    Some(0x2194) => Some('↔'),
+                    Some(0x21d0) => Some('⇐'),
+                    Some(0x21d2) => Some('⇒'),
+                    Some(0x21d4) => Some('⇔'),
+                    Some(0x27f5) => Some('⟵'),
+                    Some(0x27f6) => Some('⟶'),
+                    Some(0x27f7) => Some('⟷'),
+                    Some(0x27f8) => Some('⟸'),
+                    Some(0x27f9) => Some('⟹'),
+                    Some(0x27fa) => Some('⟺'),
+                    _ => None,
+                };
+                if let Some(arrow) = arrow {
+                    output.push(arrow);
+                    i = if bytes.get(end) == Some(&b';') {
+                        end + 1
+                    } else {
+                        end
+                    };
+                    continue;
+                }
+            }
+        }
+        let ch = text[i..].chars().next().expect("valid UTF-8 boundary");
+        output.push(ch);
+        i += ch.len_utf8();
+    }
+    output
 }
 fn format_diagrams(blocks: &mut [Block], width: f32) {
     // Fit using actual font advances. A common point size keeps adjacent rows aligned.
@@ -804,6 +882,36 @@ mod tests {
             arrow_text("&rightarrow& &leftarrow; &unknown;"),
             "→ ← &unknown;"
         );
+        assert_eq!(
+            arrow_text(
+                "&longrightarrow; &longleftarrow& &longleftrightarrow; &Longrightarrow; &rArr;"
+            ),
+            "⟶ ⟵ ⟷ ⟹ ⇒"
+        );
+        assert_eq!(
+            arrow_text(
+                "&LongLeftArrow; &LongRightArrow; &LongLeftRightArrow; &DoubleLongLeftArrow; &DoubleLongRightArrow; &DoubleLongLeftRightArrow;"
+            ),
+            "⟵ ⟶ ⟷ ⟸ ⟹ ⟺"
+        );
+        assert_eq!(
+            arrow_text("&#x27f5; &#X27F6; &#10231; &#x27F8; &#10233; &#x27fa; &#x2603;"),
+            "⟵ ⟶ ⟷ ⟸ ⟹ ⟺ &#x2603;"
+        );
+        let clipboard = parse_html(
+            "<p>&rightarrow& &longrightarrow; &Longrightarrow; &rArr; &#x27f6;</p><code>&Longrightarrow&</code>",
+            &TextStyle::default(),
+            450.0,
+            None,
+        )
+        .unwrap()
+        .content;
+        assert_eq!(clipboard.text, "→ ⟶ ⟹ ⇒ ⟶\n&Longrightarrow&");
+        let mut editor = crate::engine::Editor::new(Document::new("Arrow paste"));
+        editor.paste_fragment(&clipboard);
+        assert_eq!(editor.doc.text(), clipboard.text);
+        editor.undo();
+        assert_eq!(editor.doc.text(), "");
     }
     fn fixture() -> Import {
         let png = include_bytes!("../assets/alphadocs-icon.png");

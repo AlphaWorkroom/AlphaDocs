@@ -202,6 +202,7 @@ fn disabled_autosave_gates_periodic_writes_and_legacy_preferences_default_to_ena
     app.prefs.autosave = false;
     app.session.editor.insert("Unsaved background change");
     let saved = app.session.saved_library_revision;
+    app.last_local_edit = Instant::now() - Duration::from_secs(40);
     app.last_autosave = Instant::now() - Duration::from_secs(3);
     let before = app.last_autosave;
     let mut output = ctx.run_ui(
@@ -217,6 +218,110 @@ fn disabled_autosave_gates_periodic_writes_and_legacy_preferences_default_to_ena
     let prefs: Preferences =
         serde_json::from_str(&serde_json::to_string(&app.prefs).unwrap()).unwrap();
     assert!(!prefs.autosave);
+}
+
+fn autosave_frame_at(ctx: &Context, app: &mut AlphaDocs, now: Instant, events: Vec<Event>) {
+    app.autosave_test_now = Some(now);
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0))),
+            events,
+            ..Default::default()
+        },
+        |ui| app.update_ui(ui),
+    );
+    output.textures_delta.clear();
+}
+
+#[test]
+fn full_ui_autosave_waits_for_thirty_seconds_after_the_last_local_input() {
+    let (ctx, mut app) = editor();
+    let base = Instant::now();
+    app.prefs.autosave = true;
+    app.session.saved_library_revision = app.session.editor.revision;
+    app.last_local_edit = base;
+    app.last_history = base;
+    app.autosave_test_now = Some(base);
+    autosave_frame_at(&ctx, &mut app, base, vec![]);
+    autosave_frame_at(&ctx, &mut app, base, vec![]);
+
+    for (seconds, text) in [(0, "a"), (10, "b"), (20, "c")] {
+        ctx.memory_mut(|m| m.request_focus(Id::new("document_canvas")));
+        autosave_frame_at(
+            &ctx,
+            &mut app,
+            base + Duration::from_secs(seconds),
+            vec![Event::Text(text.into())],
+        );
+        assert_eq!(app.autosave_test_saves, 0);
+    }
+    assert_eq!(app.session.editor.revision, 3);
+
+    let preedit = Event::Ime(egui::ImeEvent::Preedit {
+        text: "é".into(),
+        active_range_chars: Some(0..1),
+    });
+    autosave_frame_at(
+        &ctx,
+        &mut app,
+        base + Duration::from_secs(50),
+        vec![preedit],
+    );
+    assert_eq!(app.autosave_test_saves, 0);
+    ctx.memory_mut(|m| m.request_focus(Id::new("document_canvas")));
+    autosave_frame_at(
+        &ctx,
+        &mut app,
+        base + Duration::from_secs(51),
+        vec![Event::Ime(egui::ImeEvent::Commit("é".into()))],
+    );
+    assert_eq!(app.autosave_test_saves, 0);
+
+    autosave_frame_at(&ctx, &mut app, base + Duration::from_secs(80), vec![]);
+    assert_eq!(app.autosave_test_saves, 0);
+    autosave_frame_at(&ctx, &mut app, base + Duration::from_secs(81), vec![]);
+    assert_eq!(app.autosave_test_saves, 1);
+    assert_eq!(
+        app.session.saved_library_revision,
+        app.session.editor.revision
+    );
+}
+
+#[test]
+fn autosave_gate_requires_dirty_idle_enabled_and_no_active_ime() {
+    let (_ctx, mut app) = editor();
+    let now = Instant::now();
+    app.prefs.autosave = true;
+    app.last_local_edit = now - Duration::from_secs(29);
+    app.last_autosave = now - Duration::from_secs(3);
+    app.session.saved_library_revision = app.session.editor.revision.wrapping_add(1);
+    assert!(!app.autosave_due(now));
+    assert!(app.autosave_due(now + Duration::from_secs(1)));
+    app.ime_preedit = "composition".into();
+    assert!(!app.autosave_due(now + Duration::from_secs(1)));
+    app.ime_preedit.clear();
+    app.prefs.autosave = false;
+    assert!(!app.autosave_due(now + Duration::from_secs(1)));
+    app.prefs.autosave = true;
+    app.session.saved_library_revision = app.session.editor.revision;
+    assert!(!app.autosave_due(now + Duration::from_secs(1)));
+}
+
+#[test]
+fn content_tab_navigation_does_not_reset_the_local_edit_idle_clock() {
+    let (_ctx, mut app) = editor();
+    app.session.editor.add_tab();
+    app.session.saved_library_revision = app.session.editor.revision;
+    let before = app.autosave_revision();
+    assert!(app.session.editor.switch_tab(0));
+    let after_navigation = app.autosave_revision();
+    assert!(!AlphaDocs::local_revision_changed(
+        &before,
+        &after_navigation
+    ));
+    app.session.editor.insert("Local edit");
+    let after_edit = app.autosave_revision();
+    assert!(AlphaDocs::local_revision_changed(&before, &after_edit));
 }
 #[test]
 fn double_click_content_tab_opens_rename_without_creating_another_document() {

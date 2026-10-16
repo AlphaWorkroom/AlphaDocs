@@ -76,12 +76,55 @@ jobs:
         if: runner.os != 'Windows'
         # dmgbuild writes Finder metadata directly, without AppleScript/UI access.
         run: python scripts/package_unix.py
+      - name: Verify isolated Linux DEB update swap without elevation or relaunch
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          target="$RUNNER_TEMP/alphadocs-update-test"
+          mkdir -p "$target/opt/alphadocs" "$target/seed"
+          dpkg-deb --extract releases/AlphaDocs-Linux-x86_64.deb "$target/seed"
+          cp -a "$target/seed/opt/alphadocs/." "$target/opt/alphadocs/"
+          sleep 0.1 & old_pid=$!
+          wait "$old_pid" || true
+          sh scripts/update_linux.sh "$old_pid" "$PWD/releases/AlphaDocs-Linux-x86_64.deb" "$target/opt/alphadocs" "$target/opt/alphadocs/alphadocs" "$target/update.log" --verify-update
+          test -x "$target/opt/alphadocs/alphadocs"
+          test -x "$target/opt/alphadocs.previous-$old_pid/alphadocs"
+          ALPHADOCS_DATA_DIR="$RUNNER_TEMP/alphadocs-update-profile" "$target/opt/alphadocs/alphadocs" --self-check
+          ALPHADOCS_DATA_DIR="$RUNNER_TEMP/alphadocs-update-profile" "$target/opt/alphadocs.previous-$old_pid/alphadocs" --self-check
+      - name: Verify isolated macOS DMG update swap without relaunch
+        if: runner.os == 'macOS'
+        run: |
+          set -eu
+          dmg="releases/AlphaDocs-${{ matrix.platform }}.dmg"
+          mount="$RUNNER_TEMP/alphadocs-update-seed"
+          app="$RUNNER_TEMP/AlphaDocs.app"
+          mkdir -m 700 "$mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$dmg"
+          ditto "$mount/AlphaDocs.app" "$app"
+          hdiutil detach "$mount"
+          rmdir "$mount"
+          sleep 0.1 & old_pid=$!
+          wait "$old_pid" || true
+          sh scripts/update_macos.sh "$old_pid" "$PWD/$dmg" "$app" "$RUNNER_TEMP/update.log" --verify-update
+          test -x "$app/Contents/MacOS/alphadocs"
+          test -x "$RUNNER_TEMP/AlphaDocs.previous-$old_pid/Contents/MacOS/alphadocs"
+          codesign --verify --deep --strict "$app"
+          ALPHADOCS_DATA_DIR="$RUNNER_TEMP/alphadocs-update-profile" "$app/Contents/MacOS/alphadocs" --self-check
+          ALPHADOCS_DATA_DIR="$RUNNER_TEMP/alphadocs-update-profile" "$RUNNER_TEMP/AlphaDocs.previous-$old_pid/Contents/MacOS/alphadocs" --self-check
       - name: Verify Windows installer payload without changing the runner profile
         if: runner.os == 'Windows'
         run: |
           $p = Start-Process releases/AlphaDocs-Windows-x86_64-Setup.exe -ArgumentList '--verify-extract', "$env:RUNNER_TEMP/alphadocs-extraction" -Wait -PassThru -WindowStyle Hidden
           if ($p.ExitCode -ne 0) { throw 'Installer extraction failed' }
           if ((Get-FileHash "$env:RUNNER_TEMP/alphadocs-extraction/AlphaDocs.exe").Hash -ne (Get-FileHash dist/AlphaDocs.exe).Hash) { throw 'Installer binary mismatch' }
+      - name: Verify Windows installer update swap in a disposable temporary folder
+        if: runner.os == 'Windows'
+        run: |
+          $target = Join-Path ([IO.Path]::GetTempPath()) ('alphadocs-update-' + [guid]::NewGuid().ToString('N'))
+          $p = Start-Process releases/AlphaDocs-Windows-x86_64-Setup.exe -ArgumentList @('--verify-update', $target) -Wait -PassThru -WindowStyle Hidden
+          if ($p.ExitCode -ne 0) { throw 'Isolated Windows update swap verification failed' }
+          if (!(Test-Path (Join-Path $target 'AlphaDocs.exe'))) { throw 'Updated Windows payload was not installed in the isolated folder' }
+          if (!(Get-ChildItem -Path "$target.previous-*" -Directory -ErrorAction SilentlyContinue)) { throw 'Previous Windows payload was not retained' }
       - name: Install and verify Linux DEB
         if: runner.os == 'Linux'
         run: |

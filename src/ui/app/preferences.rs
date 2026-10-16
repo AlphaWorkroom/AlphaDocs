@@ -46,14 +46,18 @@ impl AlphaDocs {
                 if let Some(i)=remove{self.prefs.typing.replacements.remove(i);}
                 if ui.add_enabled(self.prefs.typing.replacements.len()<100,egui::Button::new("+ Add substitution")).clicked(){self.prefs.typing.replacements.push(crate::writing::Substitution{enabled:true,from:String::new(),to:String::new()});}
             }else{
+                Frame::new().fill(p.toolbar).corner_radius(12).inner_margin(14).show(ui,|ui|{
+                    ui.horizontal(|ui|{ui.label(RichText::new("Autosave").strong().size(16.0));ui.label(RichText::new(if self.prefs.autosave {"On"}else{"Off"}).color(p.accent));});
+                    let r=checkbox(ui,&mut self.prefs.autosave,"Enable autosave",p);
+                    #[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(Id::new("autosave_preference_bounds"),r.rect));
+                    #[cfg(not(test))] let _=r;
+                    ui.label(RichText::new(if self.prefs.autosave {"Saves locally after 30 seconds without editing. Each edit restarts the wait, so autosave stays out of the way while you type."}else{"Autosave is off. Use Save to keep your work. Closing or switching documents still saves them locally."}).size(12.0).color(p.muted));
+                });
+                ui.add_space(14.0);
                 ui.label("Appearance");ui.horizontal(|ui|{for (t,label) in [(Theme::System,"System"),(Theme::Light,"Light"),(Theme::Dark,"Dark")] {ui.radio_value(&mut self.prefs.theme,t,label);}});
                 checkbox(ui,&mut self.prefs.outline,"Show document outline",p);
                 checkbox(ui,&mut self.prefs.ruler,"Show ruler",p);
                 checkbox(ui,&mut self.prefs.counts,"Display word count while typing",p);
-                let r=checkbox(ui,&mut self.prefs.autosave,"Automatically save every 2 seconds",p);
-                #[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(Id::new("autosave_preference_bounds"),r.rect));
-                #[cfg(not(test))] let _=r;
-                ui.label(RichText::new(if self.prefs.autosave {"Documents are saved locally every 2 seconds. Save and closing also keep your work."}else{"Automatic saving is off. Use Save to keep your work. Closing documents still saves them locally."}).size(12.0).color(p.muted));
                 ui.add_space(14.0);ui.separator();ui.label("While typing · off until you enable them");
                 checkbox(ui,&mut self.prefs.typing.capitalize,"Automatically capitalize sentence starts",p);
                 checkbox(ui,&mut self.prefs.typing.smart_quotes,"Use smart quotes",p);

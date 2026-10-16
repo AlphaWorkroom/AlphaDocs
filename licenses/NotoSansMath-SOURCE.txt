@@ -1,0 +1,5 @@
+Noto Sans Math
+Copyright 2022 The Noto Project Authors
+Source repository: https://github.com/notofonts/math
+Font release: https://github.com/notofonts/math/releases/tag/NotoSansMath-v3.000
+License: SIL Open Font License 1.1; see NotoSansMath-OFL.txt

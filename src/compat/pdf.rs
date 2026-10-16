@@ -88,6 +88,12 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
             bold: true,
             ..Default::default()
         },
+        // Embed the bundled symbol face so characters routed through
+        // `symbol_key` stay the same Unicode glyphs in searchable PDF text.
+        TextStyle {
+            font: "Noto Sans Math".into(),
+            ..Default::default()
+        },
         doc.page.header.style.clone(),
         doc.page.footer.style.clone(),
     ];
@@ -388,7 +394,10 @@ mod tests {
     #[test]
     fn pdf_symbol_fallback_preserves_unicode() {
         let mut doc = Document::new("PDF symbols");
-        doc.blocks = vec![Block::Paragraph(Paragraph::from_text("┌─┐│├┤└┘→←↑↓↔"))];
+        let arrows = "⟵⟶⟷⟸⟹⟺";
+        doc.blocks = vec![Block::Paragraph(Paragraph::from_text(&format!(
+            "┌─┐│├┤└┘→←↑↓↔{arrows}"
+        )))];
         let ctx = eframe::egui::Context::default();
         fonts::install(&ctx);
         let mut bytes = Vec::new();
@@ -404,7 +413,10 @@ mod tests {
             .flat_map(|p| p.extract_text(&parsed.resources))
             .collect::<Vec<_>>()
             .join("");
-        assert!(extracted.contains("┌─┐│├┤└┘→←↑↓↔"), "{extracted}");
+        assert!(
+            extracted.contains(&format!("┌─┐│├┤└┘→←↑↓↔{arrows}")),
+            "{extracted}"
+        );
     }
     #[test]
     fn pdf_preserves_measured_pages_fonts_and_links() {

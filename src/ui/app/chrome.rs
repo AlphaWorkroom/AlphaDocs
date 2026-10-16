@@ -2,6 +2,57 @@ use super::*;
 
 /// Client-drawn tabs and controls; all window operations use native viewport commands.
 pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
+    show_with_platform(app, ui, WindowChrome::current());
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowChrome {
+    NativeMacOS,
+    Custom,
+}
+impl WindowChrome {
+    const fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::NativeMacOS
+        } else {
+            Self::Custom
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct HeaderGeometry {
+    tabs: Rect,
+    search: Rect,
+    controls: Rect,
+}
+fn header_geometry(row: Rect, chrome: WindowChrome) -> HeaderGeometry {
+    let custom_controls = if chrome == WindowChrome::Custom {
+        138.0
+    } else {
+        0.0
+    };
+    let native_traffic_lights = if chrome == WindowChrome::NativeMacOS {
+        80.0
+    } else {
+        0.0
+    };
+    let controls = Rect::from_min_max(pos2(row.right() - custom_controls, row.top()), row.max);
+    let search = Rect::from_min_size(
+        pos2(controls.left() - 176.0, row.top() + 5.0),
+        vec2(164.0, 32.0),
+    );
+    HeaderGeometry {
+        tabs: Rect::from_min_max(
+            pos2(row.left() + native_traffic_lights, row.top()),
+            pos2(search.left() - 8.0, row.bottom()),
+        ),
+        search,
+        controls,
+    }
+}
+
+fn show_with_platform(app: &mut AlphaDocs, ui: &mut Ui, chrome: WindowChrome) {
     let p = app.palette;
     let ctx = ui.ctx().clone();
     egui::Panel::top("desktop_header")
@@ -15,21 +66,25 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
         )
         .show(ui, |ui| {
             let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::hover());
-            let controls = Rect::from_min_max(pos2(row.right() - 138.0, row.top()), row.max);
+            let geometry = header_geometry(row, chrome);
             let mut tabs_ui = ui.new_child(
                 egui::UiBuilder::new()
-                    .max_rect(Rect::from_min_max(
-                        row.min,
-                        pos2(controls.left() - 184.0, row.bottom()),
-                    ))
+                    .max_rect(geometry.tabs)
                     .layout(UiLayout::left_to_right(Align::Center)),
             );
             tabs_ui.spacing_mut().item_spacing.x = 6.0;
             let (brand, _) = tabs_ui.allocate_exact_size(vec2(24.0, 28.0), Sense::hover());
             icons::brand(&mut tabs_ui, brand.shrink2(vec2(2.0, 1.0)), p.accent);
-            if tab(&mut tabs_ui, "Documents", app.home, p, None)
-                .0
-                .clicked()
+            if tab(
+                &mut tabs_ui,
+                "Documents",
+                app.home,
+                p,
+                None,
+                Id::new("home_document_tab"),
+            )
+            .0
+            .clicked()
             {
                 app.queue(Action::Home);
             }
@@ -58,8 +113,14 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
                             } else {
                                 document.title.clone()
                             };
-                            let (response, close_response) =
-                                tab(ui, &label, active && !app.home, p, Some(index));
+                            let (response, close_response) = tab(
+                                ui,
+                                &label,
+                                active && !app.home,
+                                p,
+                                Some(index),
+                                Id::new(("open_document_tab", &document.id)),
+                            );
                             if response.clicked() {
                                 change = Some(index);
                             }
@@ -86,7 +147,7 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
             }
             let drag_rect = Rect::from_min_max(
                 pos2(tabs_ui.next_widget_position().x, row.top()),
-                pos2(controls.left() - 184.0, row.bottom()),
+                pos2(geometry.search.left() - 8.0, row.bottom()),
             );
             if drag_rect.width() > 0.0 {
                 let drag = ui.interact(drag_rect, Id::new("window_drag"), Sense::click_and_drag());
@@ -97,10 +158,7 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
                     toggle_maximize(&ctx);
                 }
             }
-            let search_rect = Rect::from_min_size(
-                pos2(controls.left() - 176.0, row.top() + 5.0),
-                vec2(164.0, 32.0),
-            );
+            let search_rect = geometry.search;
             let response = ui.interact(
                 search_rect,
                 Id::new("feature_search_button"),
@@ -140,32 +198,34 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
             {
                 app.open_feature_search();
             }
-            let mut controls_ui = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(controls)
-                    .layout(UiLayout::left_to_right(Align::Center)),
-            );
-            controls_ui.spacing_mut().item_spacing.x = 0.0;
-            if window_button(&mut controls_ui, "Minimize", 0, p).clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-            }
-            let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-            if window_button(
-                &mut controls_ui,
-                if maximized {
-                    "Restore window"
-                } else {
-                    "Maximize"
-                },
-                if maximized { 2 } else { 1 },
-                p,
-            )
-            .clicked()
-            {
-                toggle_maximize(&ctx);
-            }
-            if window_button(&mut controls_ui, "Close window", 3, p).clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            if chrome == WindowChrome::Custom {
+                let mut controls_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(geometry.controls)
+                        .layout(UiLayout::left_to_right(Align::Center)),
+                );
+                controls_ui.spacing_mut().item_spacing.x = 0.0;
+                if window_button(&mut controls_ui, "Minimize", 0, p).clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                }
+                let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                if window_button(
+                    &mut controls_ui,
+                    if maximized {
+                        "Restore window"
+                    } else {
+                        "Maximize"
+                    },
+                    if maximized { 2 } else { 1 },
+                    p,
+                )
+                .clicked()
+                {
+                    toggle_maximize(&ctx);
+                }
+                if window_button(&mut controls_ui, "Close window", 3, p).clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
             }
             if let Some(index) = change {
                 app.switch_tab(index);
@@ -184,7 +244,9 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
                 }
             }
         });
-    resize_edges(ui);
+    if chrome == WindowChrome::Custom {
+        resize_edges(ui);
+    }
 }
 fn tab(
     ui: &mut Ui,
@@ -192,9 +254,11 @@ fn tab(
     selected: bool,
     p: Palette,
     close: Option<usize>,
+    id: Id,
 ) -> (egui::Response, Option<egui::Response>) {
     let width = if close.is_some() { 192.0 } else { 116.0 };
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 34.0), Sense::click());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 34.0), Sense::hover());
+    let response = ui.interact(rect, id, Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, label)
     });
@@ -275,7 +339,8 @@ fn toggle_maximize(ctx: &Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
 }
 fn window_button(ui: &mut Ui, label: &str, kind: u8, p: Palette) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(46.0, 42.0), Sense::click());
+    let (rect, _) = ui.allocate_exact_size(vec2(46.0, 42.0), Sense::hover());
+    let response = ui.interact(rect, Id::new(("window_button", label)), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     let fg = if kind == 3 && response.hovered() {
         Color32::WHITE
@@ -423,5 +488,93 @@ mod title_tests {
         for n in 0..250 {
             assert!((0.0..=140.0).contains(&title_scroll_offset(n as f64 * 0.1, 140.0)));
         }
+    }
+
+    #[test]
+    fn macos_header_frame_uses_native_window_controls_and_keeps_tabs_clear_of_search() {
+        let ctx = Context::default();
+        fonts::install(&ctx);
+        let mut app = AlphaDocs::fresh(&ctx, Preferences::default(), vec![]);
+        app.tabs.open(
+            &mut app.session,
+            DocumentSession::new(Document::new("First open document"), None),
+        );
+        app.tabs.open(
+            &mut app.session,
+            DocumentSession::new(Document::new("Second open document"), None),
+        );
+        app.home = false;
+        let active_id = app.session.editor.doc.id.clone();
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 960.0));
+        let mut frame = |events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        show_with_platform(&mut app, ui, WindowChrome::NativeMacOS);
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            output
+        };
+
+        let first = frame(vec![]);
+        let tab = ctx
+            .read_response(Id::new(("open_document_tab", &active_id)))
+            .expect("open document tab is interactive");
+        let search = ctx
+            .read_response(Id::new("feature_search_button"))
+            .expect("feature search is interactive");
+        assert!(tab.rect.right() < search.rect.left());
+        assert!(tab.rect.left() >= 80.0, "native traffic-light reservation");
+        for label in ["Minimize", "Maximize", "Restore window", "Close window"] {
+            assert!(
+                ctx.read_response(Id::new(("window_button", label)))
+                    .is_none()
+            );
+        }
+        let commands = &first.viewport_output[&egui::ViewportId::ROOT].commands;
+        assert!(!commands.iter().any(is_custom_window_action));
+
+        // The former custom-control hit zones now belong to feature search or
+        // the header background. Clicking there must never issue OS window actions.
+        let row = Rect::from_min_size(pos2(10.0, 0.0), vec2(1420.0, 42.0));
+        let geometry = header_geometry(row, WindowChrome::NativeMacOS);
+        assert!(geometry.tabs.right() < geometry.search.left());
+        for x in [row.right() - 23.0, row.right() - 69.0, row.right() - 115.0] {
+            for pressed in [true, false] {
+                let output = frame(vec![
+                    Event::PointerMoved(pos2(x, 21.0)),
+                    Event::PointerButton {
+                        pos: pos2(x, 21.0),
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::default(),
+                    },
+                ]);
+                let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+                assert!(!commands.iter().any(is_custom_window_action));
+                for label in ["Minimize", "Maximize", "Restore window", "Close window"] {
+                    assert!(
+                        ctx.read_response(Id::new(("window_button", label)))
+                            .is_none()
+                    );
+                }
+            }
+        }
+    }
+
+    fn is_custom_window_action(command: &egui::ViewportCommand) -> bool {
+        matches!(
+            command,
+            egui::ViewportCommand::Close
+                | egui::ViewportCommand::Minimized(_)
+                | egui::ViewportCommand::Maximized(_)
+        )
     }
 }
