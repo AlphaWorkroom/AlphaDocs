@@ -31,6 +31,14 @@ pub struct Preferences {
     pub recent_emojis: Vec<String>,
     pub personal_dictionary: Vec<String>,
     pub check_updates: bool,
+    pub default_page: Option<crate::model::PageSetup>,
+    pub spelling_suggestions: bool,
+    pub grammar_suggestions: bool,
+    pub online_translation: bool,
+    pub nearby_invites: bool,
+    pub accessible_text: bool,
+    pub interface_scale: f32,
+    pub typing: crate::writing::TypingPreferences,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -46,6 +54,14 @@ impl Default for Preferences {
             recent_emojis: Vec::new(),
             personal_dictionary: Vec::new(),
             check_updates: true,
+            default_page: None,
+            spelling_suggestions: true,
+            grammar_suggestions: true,
+            online_translation: false,
+            nearby_invites: true,
+            accessible_text: true,
+            interface_scale: 1.0,
+            typing: Default::default(),
         }
     }
 }
@@ -162,6 +178,11 @@ pub fn preferences() -> Preferences {
         .unwrap_or_default();
     prefs.zoom = if prefs.zoom.is_finite() {
         prefs.zoom.clamp(0.25, 3.0)
+    } else {
+        1.0
+    };
+    prefs.interface_scale = if prefs.interface_scale.is_finite() {
+        prefs.interface_scale.clamp(1.0, 1.5)
     } else {
         1.0
     };

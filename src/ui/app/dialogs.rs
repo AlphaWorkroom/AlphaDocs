@@ -1,116 +1,6 @@
 use super::*;
 
 impl AlphaDocs {
-    fn page_dialog(&mut self, ui: &mut Ui, close: &mut bool) {
-        let p = self.palette;
-        ui.heading(RichText::new("Page setup").size(24.0));
-        ui.add_space(14.0);
-        ui.label(RichText::new("Pages").color(p.accent));
-        ui.separator();
-        ui.label("Orientation");
-        ui.horizontal(|ui| {
-            ui.radio_value(&mut self.page_draft.landscape, false, "Portrait");
-            ui.radio_value(&mut self.page_draft.landscape, true, "Landscape");
-        });
-        ui.label("Paper size");
-        egui::ComboBox::from_id_salt("paper_size")
-            .selected_text(match self.page_draft.paper {
-                Paper::A4 => "A4 (8.27″ × 11.69″)",
-                Paper::Letter => "Letter (8.5″ × 11″)",
-            })
-            .width(310.0)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.page_draft.paper, Paper::A4, "A4 (8.27″ × 11.69″)");
-                ui.selectable_value(
-                    &mut self.page_draft.paper,
-                    Paper::Letter,
-                    "Letter (8.5″ × 11″)",
-                );
-            });
-        ui.horizontal(|ui| {
-            ui.label("Page colour");
-            ui.color_edit_button_srgb(&mut self.page_draft.color);
-        });
-        ui.add_space(8.0);
-        ui.label("Margins (inches)");
-        ui.horizontal(|ui| {
-            for (i, name) in ["Top", "Bottom", "Left", "Right"].iter().enumerate() {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(*name).size(12.0));
-                    let mut value = self.page_draft.margins[i] / 72.0;
-                    if ui
-                        .add(
-                            egui::DragValue::new(&mut value)
-                                .speed(0.02)
-                                .range(0.0..=6.0)
-                                .fixed_decimals(2),
-                        )
-                        .changed()
-                    {
-                        self.page_draft.margins[i] = value * 72.0;
-                    }
-                });
-            }
-        });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.label("Columns");
-            ui.add(egui::DragValue::new(&mut self.page_draft.columns).range(1..=3));
-            ui.label("Gap (pt)");
-            ui.add(egui::DragValue::new(&mut self.page_draft.column_gap).range(0.0..=72.0));
-        });
-        ui.separator();
-        for (name, paragraph) in [
-            ("Header", &mut self.page_draft.header),
-            ("Footer", &mut self.page_draft.footer),
-        ] {
-            ui.label(name);
-            let mut text = paragraph.text();
-            if ui
-                .add(
-                    egui::TextEdit::singleline(&mut text)
-                        .desired_width(340.0)
-                        .char_limit(512)
-                        .hint_text(format!("{name} on every page")),
-                )
-                .changed()
-            {
-                paragraph.chars = text
-                    .chars()
-                    .map(|ch| StyledChar {
-                        ch,
-                        style: paragraph.style.clone(),
-                    })
-                    .collect();
-            }
-            ui.horizontal(|ui| {
-                for (alignment, label) in [
-                    (Alignment::Left, "Left"),
-                    (Alignment::Center, "Center"),
-                    (Alignment::Right, "Right"),
-                ] {
-                    ui.selectable_value(&mut paragraph.alignment, alignment, label);
-                }
-            });
-        }
-        ui.checkbox(&mut self.page_draft.page_numbers, "Page numbers");
-        if !self.page_draft.valid() {
-            ui.colored_label(p.accent, "Margins and columns must leave usable space.");
-        }
-        ui.add_space(18.0);
-        ui.with_layout(UiLayout::right_to_left(Align::Center), |ui| {
-            if primary(ui, "OK", p, self.page_draft.valid()).clicked() {
-                let page = self.page_draft.clone();
-                self.session
-                    .editor
-                    .transaction(|e| e.doc.page = page.clone());
-                *close = true;
-            }
-            if ui.button("Cancel").clicked() {
-                *close = true;
-            }
-        });
-    }
     pub(super) fn dialogs(&mut self, ctx: &Context) {
         let Some(dialog) = self.dialog else {
             return;
@@ -147,9 +37,10 @@ ui.set_width(if matches!(dialog,
 Dialog::Help | Dialog::About){
 540.0}
 else{
-368.0}
+if matches!(dialog, Dialog::Page) {348.0} else {368.0}}
 );
 match dialog{
+        Dialog::Tool(tool) => self.tool_dialog(tool,ui,&mut close),
         Dialog::Share => {},
         Dialog::Rename => {
             ui.label(RichText::new("Rename document").size(24.0));ui.add_space(16.0);
@@ -273,44 +164,7 @@ close=true;
 }
 ,
 
-        Dialog::Preferences=>{
-ui.label(RichText::new("Preferences").size(24.0));
-ui.add_space(20.0);
-ui.label("Appearance");
-for(t,
-name)in [(Theme::System,
-"Follow operating system"),
-(Theme::Light,
-"Light"),
-(Theme::Dark,
-"Dark")]{
-ui.radio_value(&mut self.prefs.theme,
-t,
-name);
-}
-ui.add_space(16.0);
-ui.checkbox(&mut self.prefs.outline,
-"Show document outline");
-ui.checkbox(&mut self.prefs.ruler,
-"Show ruler");
-ui.checkbox(&mut self.prefs.counts,
-"Display word count while typing");
-let autosave_response=ui.checkbox(&mut self.prefs.autosave, "Automatically save every 2 seconds");
-#[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(Id::new("autosave_preference_bounds"),autosave_response.rect));
-#[cfg(not(test))] let _ = autosave_response;
-ui.add_space(20.0);
-ui.label(RichText::new(if self.prefs.autosave { "Documents are saved locally every 2 seconds. Save and closing also keep your work." } else { "Automatic saving is off. Use Save to keep your work. Closing documents still saves them locally." }).size(12.0).color(p.muted));
-ui.add_space(20.0);
-
-if primary(ui,
-"Done",
-p,
-true).clicked(){
-close=true;
-}
-}
-,
-
+        Dialog::Preferences=>self.preferences_dialog(ui,&mut close),
         Dialog::History=>{
 ui.label(RichText::new("Version history").size(24.0));
 ui.add_space(16.0);
@@ -505,6 +359,7 @@ Dialog::Find=>{
 
             self.scroll_caret = true;
 
+            #[cfg(not(test))]
             let _ = persistence::save_preferences(&self.prefs);
         }
     }

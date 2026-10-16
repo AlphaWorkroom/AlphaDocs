@@ -524,6 +524,33 @@ impl Flow {
     }
 }
 impl Layout {
+    /// Numbers follow measured body lines, in reading order, never a character estimate.
+    /// Omit a number when its measured left gutter would overlap the line's text.
+    pub fn numbered_lines<'a>(&'a self, doc: &'a Document) -> Vec<(&'a Line, usize)> {
+        if doc.page.pageless || doc.page.line_numbers == LineNumbering::Off {
+            return vec![];
+        }
+        let mut number = 0;
+        let mut page = 0;
+        self.lines
+            .iter()
+            .filter(|line| {
+                line.rect.left() >= 18.0
+                    && matches!(
+                        doc.blocks.get(line.address.block),
+                        Some(Block::Paragraph(_))
+                    )
+            })
+            .map(|line| {
+                if doc.page.line_numbers == LineNumbering::EachPage && line.page != page {
+                    number = 0;
+                }
+                page = line.page;
+                number += 1;
+                (line, number)
+            })
+            .collect()
+    }
     pub fn measure(ctx: &Context, doc: &Document) -> Self {
         Self::measure_cached(ctx, doc, &mut MeasurementCache::default())
     }
@@ -531,10 +558,19 @@ impl Layout {
     /// font definitions; cached rows are measured data and are never painted.
     pub fn measure_cached(ctx: &Context, doc: &Document, cache: &mut MeasurementCache) -> Self {
         cache.begin(ctx, doc);
-        let (w, h) = doc.page.size();
+        let (w, paper_height) = doc.page.size();
+        let h = if doc.page.pageless {
+            f32::INFINITY
+        } else {
+            paper_height
+        };
         let [top, bottom, left, right] = doc.page.margins;
         let full_width = w - left - right;
-        let columns = doc.page.columns.max(1) as usize;
+        let columns = if doc.page.pageless {
+            1
+        } else {
+            doc.page.columns.max(1) as usize
+        };
         let content = (full_width - doc.page.column_gap * (columns - 1) as f32) / columns as f32;
         let header = cache.shape(
             ctx,
@@ -556,12 +592,12 @@ impl Layout {
             &doc.page.footer,
             full_width,
         );
-        let header_height = if doc.page.header.chars.is_empty() {
+        let header_height = if doc.page.pageless || doc.page.header.chars.is_empty() {
             0.0
         } else {
             header.rect.height()
         };
-        let footer_height = if doc.page.footer.chars.is_empty() {
+        let footer_height = if doc.page.pageless || doc.page.footer.chars.is_empty() {
             0.0
         } else {
             footer.rect.height()
@@ -606,7 +642,10 @@ impl Layout {
                         spaced.before = (p.before - previous.after).max(0.0);
                     }
                     let p = &spaced;
-                    if p.page_break_before && (flow.y > top + 0.01 || flow.column > 0) {
+                    if !doc.page.pageless
+                        && p.page_break_before
+                        && (flow.y > top + 0.01 || flow.column > 0)
+                    {
                         flow.new_page();
                     }
                     let marker = match p.list {
@@ -734,7 +773,11 @@ impl Layout {
                     }
                     flow.y += p.after;
                 }
-                Block::PageBreak => flow.new_page(),
+                Block::PageBreak => {
+                    if !doc.page.pageless {
+                        flow.new_page();
+                    }
+                }
                 Block::Rule => {
                     flow.ensure(12.0);
                     out.objects.push(Object::Rule {
@@ -958,7 +1001,24 @@ impl Layout {
             }
         }
         out.pages = flow.page + 1;
-        for page in 0..out.pages {
+        if doc.page.pageless {
+            out.size.y = flow.y.max(
+                out.lines
+                    .iter()
+                    .map(|l| l.rect.bottom())
+                    .fold(0.0, f32::max),
+            ) + bottom;
+            out.size.y = out.size.y.max(300.0);
+            for object in &out.objects {
+                let rect = match object {
+                    Object::Image { rect, .. }
+                    | Object::Border { rect, .. }
+                    | Object::Rule { rect, .. } => rect,
+                };
+                out.size.y = out.size.y.max(rect.bottom() + bottom);
+            }
+        }
+        for page in 0..if doc.page.pageless { 0 } else { out.pages } {
             for (row, p, g, y) in [
                 (0, &doc.page.header, &header, 18.0),
                 (1, &doc.page.footer, &footer, h - 18.0 - footer_height),
@@ -1296,6 +1356,143 @@ mod tests {
         for l in b.lines {
             assert!(l.rect.bottom() <= wide.page.size().1 - wide.page.margins[1] + 0.1);
         }
+    }
+
+    #[test]
+    fn every_paper_preset_measures_with_both_orientations() {
+        for paper in Paper::STANDARD {
+            for landscape in [false, true] {
+                let mut doc = Document::new("Paper measurement");
+                doc.page.paper = paper;
+                doc.page.landscape = landscape;
+                doc.page.margins = [30.0; 4];
+                doc.blocks = vec![Block::Paragraph(Paragraph::from_text(
+                    &"Measured typography follows the selected physical page size. ".repeat(90),
+                ))];
+                let layout = measured(&doc);
+                let (width, height) = doc.page.size();
+                assert_eq!(layout.size.x, width, "{paper:?}, landscape={landscape}");
+                assert_eq!(layout.size.y, height, "{paper:?}, landscape={landscape}");
+                assert!(layout.pages >= 1);
+                assert!(!layout.lines.is_empty());
+                assert!(
+                    layout.lines.iter().all(|line| {
+                        line.rect.left() >= doc.page.margins[2] - 0.1
+                            && line.rect.right() <= width - doc.page.margins[3] + 1.0
+                            && line.rect.bottom() <= height - doc.page.margins[1] + 1.0
+                    }),
+                    "{paper:?}, landscape={landscape}, page=({width}, {height}), margins={:?}, bad geometry: {:?}",
+                    doc.page.margins,
+                    layout
+                        .lines
+                        .iter()
+                        .find(|line| {
+                            line.rect.left() < doc.page.margins[2] - 0.1
+                                || line.rect.right() > width - doc.page.margins[3] + 0.1
+                                || line.rect.bottom() > height - doc.page.margins[1] + 0.1
+                        })
+                        .map(|line| (line.page, line.rect))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pageless_geometry_is_finite_and_wraps_around_floats() {
+        let mut doc = Document::new("Pageless geometry");
+        doc.page.pageless = true;
+        doc.page.paper = Paper::Custom {
+            width: 420.0,
+            height: 600.0,
+        };
+        doc.page.landscape = true;
+        doc.page.margins = [36.0; 4];
+        doc.page.header = Paragraph::from_text("Hidden in pageless mode");
+        doc.page.footer = Paragraph::from_text("Also hidden");
+        let image = EmbeddedImage {
+            name: "Float".into(),
+            width: 140.0,
+            height: 110.0,
+            placement: ImagePlacement {
+                flow: ImageFlow::Wrap,
+                margins: [4.0; 4],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        doc.blocks = vec![
+            Block::Paragraph(Paragraph::from_text("Before the floating image.")),
+            Block::Image(image),
+            Block::Paragraph(Paragraph::from_text(
+                &"Text wraps beside the image, then continues beneath it. ".repeat(12),
+            )),
+        ];
+        let layout = measured(&doc);
+        let image_rect = layout
+            .objects
+            .iter()
+            .find_map(|object| match object {
+                Object::Image { rect, .. } => Some(*rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(layout.pages, 1);
+        assert!(layout.size.x.is_finite() && layout.size.y.is_finite());
+        assert!(layout.size.y > image_rect.bottom());
+        assert!(layout.running.is_empty());
+        assert!(
+            layout
+                .lines
+                .iter()
+                .all(|line| line.rect.right() <= layout.size.x)
+        );
+        assert!(
+            layout
+                .lines
+                .iter()
+                .any(|line| { line.address.block == 2 && line.rect.top() < image_rect.bottom() })
+        );
+        assert!(
+            layout
+                .lines
+                .iter()
+                .any(|line| { line.address.block == 2 && line.rect.top() >= image_rect.bottom() })
+        );
+    }
+
+    #[test]
+    fn measured_line_numbers_skip_tables_and_restart_each_page() {
+        let mut doc = Document::new("Line numbering");
+        doc.page.line_numbers = LineNumbering::EachPage;
+        doc.page.header = Paragraph::from_text("Header line is not numbered");
+        doc.blocks = vec![
+            Block::Paragraph(Paragraph::from_text(&"body line ".repeat(400))),
+            Block::Table(vec![vec![Paragraph::from_text("table line")]]),
+            Block::Paragraph(Paragraph::from_text("after table")),
+        ];
+        let layout = measured(&doc);
+        let numbered = layout.numbered_lines(&doc);
+        assert!(layout.pages > 1);
+        assert!(!layout.running.is_empty());
+        assert!(
+            numbered.iter().all(|(line, _)| {
+                line.address.block != 1 && line.address.block < doc.blocks.len()
+            })
+        );
+        let mut prior_page = None;
+        let mut expected = 0;
+        for (line, number) in numbered {
+            if prior_page != Some(line.page) {
+                expected = 0;
+                prior_page = Some(line.page);
+            }
+            expected += 1;
+            assert_eq!(number, expected);
+        }
+
+        doc.page.margins[2] = 0.0;
+        let layout = measured(&doc);
+        assert!(layout.numbered_lines(&doc).is_empty());
     }
     #[test]
     fn explicit_break_and_table_flow() {

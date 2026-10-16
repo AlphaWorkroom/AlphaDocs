@@ -17,3 +17,5 @@ pub mod proofing;
 pub mod session;
 pub mod ui;
 pub mod updates;
+
+pub mod writing;

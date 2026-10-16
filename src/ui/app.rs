@@ -16,12 +16,17 @@ mod input;
 #[cfg(test)]
 mod input_tests;
 mod live_proofing;
+mod page_setup;
 mod pointer_gesture;
+mod preferences;
 mod print_screen;
 mod proofing;
 mod sharing;
 mod table_controls;
 mod toolbar_chrome;
+mod tools;
+#[cfg(test)]
+mod tools_tests;
 mod updating;
 use crate::{
     compat,
@@ -65,9 +70,11 @@ enum Dialog {
     Delete,
     Message,
     ExportResult,
+    Tool(tools::Tool),
 }
 #[derive(Clone, Copy)]
 enum Action {
+    Tool(tools::Tool),
     CheckUpdates,
     Rename,
     New,
@@ -194,6 +201,7 @@ pub struct AlphaDocs {
     paste_state: Option<proofing::PasteState>,
     sharing: sharing::ShareState,
     update_state: updating::UpdateState,
+    tools: tools::Tools,
 }
 #[derive(Default)]
 struct DocumentContentCache {
@@ -227,8 +235,12 @@ impl AlphaDocs {
         app
     }
     fn fresh(ctx: &Context, prefs: Preferences, recents: Vec<Recent>) -> Self {
+        ctx.set_zoom_factor(prefs.interface_scale);
         let palette = theme::apply(ctx, prefs.theme);
-        let doc = blank_document("Untitled document");
+        let mut doc = blank_document("Untitled document");
+        if let Some(page) = prefs.default_page.as_ref().filter(|p| p.valid()) {
+            doc.page = page.clone();
+        }
         let page_draft = doc.page.clone();
         Self {
             session: DocumentSession::new(doc, None),
@@ -315,6 +327,7 @@ impl AlphaDocs {
             paste_state: None,
             sharing: sharing::ShareState::default(),
             update_state: Default::default(),
+            tools: Default::default(),
             view_tab_id: "tab-1".into(),
         }
     }
@@ -700,11 +713,16 @@ impl AlphaDocs {
             return;
         }
         match a {
+            Action::Tool(tool) => self.open_tool(tool),
             Action::Share => self.open_sharing(),
             Action::ToggleMenus => self.toggle_menus(ctx),
             Action::New => {
                 self.flush();
-                self.load(blank_document("Untitled document"), None);
+                let mut doc = blank_document("Untitled document");
+                if let Some(page) = self.prefs.default_page.as_ref().filter(|p| p.valid()) {
+                    doc.page = page.clone();
+                }
+                self.load(doc, None);
             }
             Action::Open => {
                 if let Some(p) = rfd::FileDialog::new()
@@ -1230,21 +1248,17 @@ impl AlphaDocs {
                     }
                 });
             });
-            ui.menu_button("Tools", |ui| {
-                if menu(ui, "Spelling and grammar check", "Ctrl+Alt+X", true) {
-                    self.queue(Action::Proofing);
-                }
-                ui.separator();
-                for (label, a) in [
-                    ("Word count", Action::Count),
-                    ("Find and replace", Action::Find),
-                    ("Preferences", Action::Preferences),
-                ] {
-                    if menu(ui, label, "", true) {
-                        self.queue(a);
-                    }
-                }
-            });
+            let (tools_response, _) = egui::containers::menu::MenuButton::new("Tools")
+                .config(
+                    egui::containers::menu::MenuConfig::new()
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                )
+                .ui(ui, |ui| self.tools_menu(ui));
+            #[cfg(test)]
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(Id::new("tools_menu"), tools_response.rect));
+            #[cfg(not(test))]
+            let _ = tools_response;
             ui.menu_button("Help", |ui| {
                 if menu(ui, "Keyboard shortcuts & help", "", true) {
                     self.queue(Action::Help);
@@ -1981,6 +1995,7 @@ impl AlphaDocs {
                     self.prefs.outline = !self.prefs.outline;
                 }
             });
+        self.tools_panel(ui);
         self.image_sidebar(ui);
         self.comments_sidebar(ui);
         egui::CentralPanel::default()
@@ -2001,7 +2016,16 @@ impl AlphaDocs {
         let ctx = ui.ctx().clone();
         let scale = 4.0 / 3.0 * self.prefs.zoom;
         let proof_range = self.proofing_range();
-        let live_issues = self.live_proof.current(&self.session.editor);
+        let mut live_issues = self.live_proof.current(&self.session.editor);
+        if !self.prefs.spelling_suggestions || !self.prefs.grammar_suggestions {
+            std::sync::Arc::make_mut(&mut live_issues).retain(|i| {
+                if i.grammar {
+                    self.prefs.grammar_suggestions
+                } else {
+                    self.prefs.spelling_suggestions
+                }
+            });
+        }
         let l = self.layout.as_ref().expect("Measured layout");
         let w = l.size.x * scale;
         let h = l.size.y * scale;
@@ -2077,7 +2101,11 @@ impl AlphaDocs {
                 let mut info = egui::WidgetInfo::text_edit(
                     !self.session.viewing,
                     "",
-                    self.content_cache.text.clone(),
+                    if self.prefs.accessible_text {
+                        self.content_cache.text.clone()
+                    } else {
+                        String::new()
+                    },
                     "Document editing surface",
                 );
                 info.label = Some("Document editing surface".into());
@@ -2407,6 +2435,19 @@ impl AlphaDocs {
                         _ => {}
                     }
                 }
+                for (line, number) in l
+                    .numbered_lines(&self.session.editor.doc)
+                    .into_iter()
+                    .filter(|(l, _)| l.page == page)
+                {
+                    ui.painter().text(
+                        o + vec2((line.rect.left() - 12.0).max(8.0), line.rect.top() + 2.0) * scale,
+                        Align2::RIGHT_TOP,
+                        number.to_string(),
+                        FontId::proportional(8.0 * scale),
+                        p.muted,
+                    );
+                }
                 let remote_selections = self.session.editor.remote_selections();
                 for line in l
                     .lines
@@ -2591,7 +2632,7 @@ impl AlphaDocs {
                 for (texture, rect, uv) in front_images {
                     ui.painter().image(texture, rect, uv, Color32::WHITE);
                 }
-                if page_setup.page_numbers {
+                if page_setup.page_numbers && !page_setup.pageless {
                     ui.painter().text(
                         o + vec2(w * 0.5, h - page_setup.margins[1] * scale * 0.5),
                         Align2::CENTER_CENTER,
@@ -3109,6 +3150,7 @@ fn template(kind: usize) -> Document {
 
 impl AlphaDocs {
     fn update_ui(&mut self, ui: &mut Ui) {
+        self.poll_tools(ui.ctx());
         self.poll_updates(ui.ctx());
         self.poll_export(ui.ctx());
         self.poll_sharing(ui.ctx());
@@ -3337,7 +3379,27 @@ fn menu_width(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool, width: f3
     } else {
         ui.visuals().weak_text_color()
     };
-    let icon = if label.contains("(.") {
+    let icon = if label == "Citations" {
+        Some(Icon::Citations)
+    } else if label.contains("Dictionary") || label.contains("dictionary") {
+        Some(Icon::Dictionary)
+    } else if label.starts_with("Compare") {
+        Some(Icon::Compare)
+    } else if label.starts_with("Voice typing") {
+        Some(Icon::Microphone)
+    } else if label.starts_with("Translate") {
+        Some(Icon::Translate)
+    } else if label == "Line numbers" {
+        Some(Icon::Number)
+    } else if label == "Accessibility" {
+        Some(Icon::Accessibility)
+    } else if label.starts_with("Notification") {
+        Some(Icon::Bell)
+    } else if label.starts_with("Review suggested") {
+        Some(Icon::Suggest)
+    } else if label == "eSignature" {
+        Some(Icon::Edit)
+    } else if label.contains("(.") {
         Some(Icon::Document)
     } else if label == "Make a copy" {
         Some(Icon::Copy)

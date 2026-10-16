@@ -74,7 +74,8 @@ Write and edit completely offline, without relying on cloud services, an account
 
 ### Familiar tools, native performance.
 
-- Measured pages, headings, lists, links, editable tables and find/replace.
+- Measured pages with 11 paper presets, custom dimensions and pageless view; headings, lists, links, editable tables and find/replace.
+- Manual citations and bibliographies, text comparison reports, measured line numbers and optional typing substitutions.
 - Offline Australian English spelling and basic grammar checks, with squiggles and right-click suggestions.
 - Reversible image editing, wrap/behind/front placement and measured alignment guides.
 - Text/image comments, replies, local reactions and emoji insertion.
@@ -83,7 +84,9 @@ Write and edit completely offline, without relying on cloud services, an account
 - Native Windows printing with driver capabilities and preview; PDF preparation on other platforms.
 - Optional encrypted direct-peer sharing on a LAN/VPN, without an AlphaDocs account or hosted backend. [Read the collaboration scope](docs/COLLABORATION.md).
 
-Document editing needs no connection. Public GitHub update checks are enabled by default, run at most once a day and can be disabled in Preferences. **Help → Check for updates** checks manually. Only release metadata is requested; document content is never sent. Updates are offered as a matching GitHub download and are installed when you choose to run the installer.
+[Full changelog](CHANGELOG.md) · [Writing tools and online-service limits](docs/WRITING_TOOLS.md).
+
+Document editing needs no connection. Public GitHub update checks are enabled by default, run at most once a day and can be disabled in Preferences. **Help → Check for updates** checks manually. Update checks request release metadata only. Online dictionary lookup sends just the searched word; document translation is hidden unless enabled in Preferences and sends text only when you click Translate. Updates are offered as a matching GitHub download and are installed when you choose to run the installer.
 
 ## Compatibility
 

@@ -70,6 +70,9 @@ pub fn export(doc: &Document, layout: &Layout, path: &Path) -> Result<(), String
 
 /// Encode the same measured layout used by the canvas, without doing file I/O.
 pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
+    if doc.page.pageless {
+        return Err("Measure a paged document copy before PDF export or printing".into());
+    }
     let mut pdf = PdfDocument::new(&doc.title);
     let mut ids = HashMap::new();
     let mut warnings = vec![];
@@ -178,6 +181,32 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                 }
                 _ => {}
             }
+        }
+        for (line, number) in layout
+            .numbered_lines(doc)
+            .into_iter()
+            .filter(|(l, _)| l.page == page)
+        {
+            ops.extend([
+                Op::StartTextSection,
+                Op::SetFont {
+                    font: PdfFontHandle::External(ids[&default_key].clone()),
+                    size: Pt(8.0),
+                },
+                Op::SetTextCursor {
+                    pos: point(
+                        (line.rect.left() - 28.0).max(2.0),
+                        h - line.rect.top() - 9.0,
+                    ),
+                },
+                Op::SetFillColor {
+                    col: rgb([100, 100, 100]),
+                },
+                Op::ShowText {
+                    items: vec![TextItem::Text(number.to_string())],
+                },
+                Op::EndTextSection,
+            ]);
         }
         for line in layout
             .lines
@@ -407,5 +436,70 @@ mod tests {
         assert!(parsed.pages[0].ops.iter().any(|op|matches!(op,Op::LinkAnnotation{link} if matches!(&link.actions,Actions::Uri(uri) if uri=="https://example.com"))));
         assert!((parsed.pages[0].media_box.width.0 - d.page.size().0).abs() < 0.1);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn every_paper_preset_exports_at_its_physical_size_in_both_orientations() {
+        for paper in Paper::STANDARD.into_iter().chain([Paper::Custom {
+            width: 703.25,
+            height: 911.75,
+        }]) {
+            for landscape in [false, true] {
+                let mut doc = Document::new("PDF page size");
+                doc.page.paper = paper;
+                doc.page.landscape = landscape;
+                doc.blocks = vec![Block::Paragraph(Paragraph::from_text("Physical size"))];
+                let ctx = eframe::egui::Context::default();
+                fonts::install(&ctx);
+                let mut pdf_bytes = None;
+                let mut output = ctx.run_ui(Default::default(), |_| {
+                    let layout = Layout::measure(&ctx, &doc);
+                    pdf_bytes = Some(encode(&doc, &layout).unwrap());
+                });
+                output.textures_delta.clear();
+                let parsed = PdfDocument::parse(
+                    &pdf_bytes.unwrap(),
+                    &PdfParseOptions::default(),
+                    &mut Vec::new(),
+                )
+                .unwrap();
+                let (width, height) = doc.page.size();
+                let box_ = &parsed.pages[0].media_box;
+                assert!((box_.width.0 - width).abs() < 0.1, "{paper:?}");
+                assert!((box_.height.0 - height).abs() < 0.1, "{paper:?}");
+                let text = parsed.pages[0].extract_text(&parsed.resources).join("");
+                assert!(
+                    text.contains("Physical") && text.contains("size"),
+                    "{paper:?}: {text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pdf_line_numbers_are_printed_and_pageless_documents_require_paged_geometry() {
+        let mut doc = Document::new("PDF line numbers");
+        doc.page.line_numbers = LineNumbering::Continuous;
+        doc.blocks = vec![Block::Paragraph(Paragraph::from_text("First\nSecond"))];
+        let ctx = eframe::egui::Context::default();
+        fonts::install(&ctx);
+        let mut result = None;
+        let mut output = ctx.run_ui(Default::default(), |_| {
+            let layout = Layout::measure(&ctx, &doc);
+            result = Some(encode(&doc, &layout).unwrap());
+        });
+        output.textures_delta.clear();
+        let parsed = PdfDocument::parse(
+            &result.unwrap(),
+            &PdfParseOptions::default(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let text = parsed.pages[0].extract_text(&parsed.resources).join("");
+        assert!(text.contains("1") && text.contains("2"), "{text:?}");
+
+        doc.page.pageless = true;
+        let layout = Layout::measure(&ctx, &doc);
+        assert!(encode(&doc, &layout).is_err());
     }
 }

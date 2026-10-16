@@ -32,7 +32,14 @@ fn fixture() -> Document {
 }
 #[test]
 fn native_download_round_trips_all_tabs_styles_original_media_without_mutation() {
-    let doc = fixture();
+    let mut doc = fixture();
+    doc.citations.push(crate::writing::Citation {
+        author: "Ada Lovelace".into(),
+        title: "Notes".into(),
+        year: "1843".into(),
+        publisher: "Analytical Engine".into(),
+        url: String::new(),
+    });
     let original = doc.clone();
     let path = std::env::temp_dir().join(format!("alphadocs-native-export-{}.adocs", doc.id));
     let report = write(&doc, Format::Native, &path).unwrap();
@@ -41,6 +48,34 @@ fn native_download_round_trips_all_tabs_styles_original_media_without_mutation()
     assert_eq!(doc, original);
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn odt_and_rtf_reports_explain_paged_line_number_and_citation_limits() {
+    let mut doc = Document::new("Export notices");
+    doc.page.pageless = true;
+    doc.page.line_numbers = LineNumbering::Continuous;
+    doc.citations.push(crate::writing::Citation {
+        author: "Ada Lovelace".into(),
+        title: "Notes".into(),
+        year: "1843".into(),
+        publisher: "Analytical Engine".into(),
+        url: String::new(),
+    });
+    doc.blocks = vec![Block::Paragraph(Paragraph::from_text("Lovelace (1843)"))];
+
+    for format in [Format::Odt, Format::Rtf] {
+        let notices = report(&doc, format).notices.join(" ");
+        assert!(notices.contains("pageless canvas setting"), "{notices}");
+        assert!(notices.contains("document line numbering"), "{notices}");
+        assert!(notices.contains("citation source library"), "{notices}");
+        assert!(
+            notices.contains("citation text already inserted"),
+            "{notices}"
+        );
+    }
+    assert!(text::plain(&doc).contains("Lovelace (1843)"));
+}
+
 fn package(bytes: Vec<u8>) -> std::collections::BTreeMap<String, Vec<u8>> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
     let mut entries = std::collections::BTreeMap::new();

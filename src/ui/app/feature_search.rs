@@ -17,6 +17,51 @@ enum Command {
 fn commands() -> Vec<(&'static str, &'static str, Command)> {
     use Command::Action as A;
     vec![
+        (
+            "Compare documents",
+            "Tools · Local text comparison",
+            A(Action::Tool(tools::Tool::Compare)),
+        ),
+        (
+            "Citations",
+            "Tools · Manual sources and bibliography",
+            A(Action::Tool(tools::Tool::Citations)),
+        ),
+        (
+            "Line numbers",
+            "Tools · Measured text lines",
+            A(Action::Tool(tools::Tool::Lines)),
+        ),
+        (
+            "Dictionary",
+            "Tools · Online word lookup",
+            A(Action::Tool(tools::Tool::Dictionary)),
+        ),
+        (
+            "Translate document",
+            "Tools · MyMemory opt-in",
+            A(Action::Tool(tools::Tool::Translate)),
+        ),
+        (
+            "Personal dictionary",
+            "Tools · Offline spelling exceptions",
+            A(Action::Tool(tools::Tool::PersonalDictionary)),
+        ),
+        (
+            "Voice typing",
+            "Tools · System dictation guidance",
+            A(Action::Tool(tools::Tool::Voice)),
+        ),
+        (
+            "Accessibility",
+            "Tools · Interface scale and document text",
+            A(Action::Tool(tools::Tool::Accessibility)),
+        ),
+        (
+            "Notification settings",
+            "Tools · Nearby invitations and updates",
+            A(Action::Tool(tools::Tool::Notifications)),
+        ),
         ("New document", "File · Ctrl+N", A(Action::New)),
         ("Open document", "File · Ctrl+O", A(Action::Open)),
         (
@@ -255,6 +300,10 @@ impl AlphaDocs {
                 let query = self.feature_query.to_lowercase();
                 let matches: Vec<_> = commands()
                     .into_iter()
+                    .filter(|(_, _, c)| {
+                        self.prefs.online_translation
+                            || !matches!(c, Command::Action(Action::Tool(tools::Tool::Translate)))
+                    })
                     .filter(|(label, hint, _)| {
                         query
                             .split_whitespace()

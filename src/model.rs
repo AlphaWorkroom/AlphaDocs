@@ -5,7 +5,9 @@ mod annotations;
 mod shared;
 mod text_storage;
 pub use shared::SharedVec;
-pub const DOCUMENT_VERSION: u32 = 9;
+mod paper;
+pub use paper::{LineNumbering, Paper};
+pub const DOCUMENT_VERSION: u32 = 10;
 
 #[cfg(test)]
 mod storage_tests {
@@ -474,12 +476,6 @@ pub enum Block {
     PageBreak,
     Rule,
 }
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub enum Paper {
-    #[default]
-    A4,
-    Letter,
-}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct PageSetup {
@@ -492,6 +488,8 @@ pub struct PageSetup {
     pub column_gap: f32,
     pub header: Paragraph,
     pub footer: Paragraph,
+    pub pageless: bool,
+    pub line_numbers: LineNumbering,
 }
 impl Default for PageSetup {
     fn default() -> Self {
@@ -505,6 +503,8 @@ impl Default for PageSetup {
             column_gap: 18.0,
             header: running_paragraph(),
             footer: running_paragraph(),
+            pageless: false,
+            line_numbers: LineNumbering::Off,
         }
     }
 }
@@ -518,15 +518,16 @@ fn running_paragraph() -> Paragraph {
 }
 impl PageSetup {
     pub fn size(&self) -> (f32, f32) {
-        let (w, h) = match self.paper {
-            Paper::A4 => (595.276, 841.89),
-            Paper::Letter => (612.0, 792.0),
-        };
+        let (w, h) = self.paper.size();
         if self.landscape { (h, w) } else { (w, h) }
     }
     pub fn valid(&self) -> bool {
         let (w, h) = self.size();
-        self.margins.iter().all(|m| m.is_finite() && *m >= 0.0)
+        w.is_finite()
+            && h.is_finite()
+            && (72.0..=14400.0).contains(&w)
+            && (72.0..=14400.0).contains(&h)
+            && self.margins.iter().all(|m| m.is_finite() && *m >= 0.0)
             && (1..=3).contains(&self.columns)
             && self.column_gap.is_finite()
             && (0.0..=72.0).contains(&self.column_gap)
@@ -536,8 +537,7 @@ impl PageSetup {
                 - self.column_gap * (self.columns as f32 - 1.0))
                 / self.columns as f32
                 >= 36.0
-            && self.margins[2] + self.margins[3] < w - 72.0
-            && self.margins[0] + self.margins[1] < h - 72.0
+            && self.margins[0] + self.margins[1] <= h - 36.0
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -554,6 +554,8 @@ pub struct Document {
     pub tabs: Vec<ContentTab>,
     #[serde(default)]
     pub active_tab: usize,
+    #[serde(default)]
+    pub citations: SharedVec<crate::writing::Citation>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ContentTab {
@@ -605,6 +607,7 @@ impl Document {
             starred: false,
             tabs: default_tabs(),
             active_tab: 0,
+            citations: SharedVec::default(),
         }
     }
     pub fn tab_blocks(&self, index: usize) -> &[Block] {
@@ -626,6 +629,7 @@ impl Document {
     /// Interchange formats without document tabs receive every tab in order.
     pub fn flattened(&self) -> Self {
         let mut result = self.clone();
+        result.page.pageless = false;
         result.blocks.clear();
         for index in 0..self.tabs.len() {
             if index > 0 {
@@ -703,6 +707,9 @@ impl Document {
         )
     }
     pub fn validate(&self) -> Result<(), String> {
+        if self.citations.len() > 1000 || self.citations.iter().any(|c| !c.valid()) {
+            return Err("Invalid citation library".into());
+        }
         if self.tabs.is_empty()
             || self.active_tab >= self.tabs.len()
             || !self.tabs[self.active_tab].blocks.is_empty()

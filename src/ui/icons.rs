@@ -50,6 +50,13 @@ pub enum Icon {
     View,
     ChevronUp,
     ChevronDown,
+    Citations,
+    Dictionary,
+    Microphone,
+    Translate,
+    Accessibility,
+    Bell,
+    Compare,
 }
 pub fn draw(ui: &Ui, rect: Rect, icon: Icon, color: Color32) {
     let p = ui.painter();
@@ -61,6 +68,97 @@ pub fn draw(ui: &Ui, rect: Rect, icon: Icon, color: Color32) {
         p.line_segment([a, b], s);
     };
     match icon {
+        Icon::Citations => {
+            for x in [2.0, 10.0] {
+                p.rect_stroke(
+                    Rect::from_min_max(xy(x, 4.0), xy(x + 5.0, 10.0)),
+                    1.0,
+                    s,
+                    egui::StrokeKind::Inside,
+                );
+                line(xy(x + 5.0, 10.0), xy(x + 3.0, 14.0));
+                line(xy(x + 3.0, 14.0), xy(x, 14.0));
+            }
+        }
+        Icon::Dictionary => {
+            p.rect_stroke(
+                Rect::from_min_max(xy(3.0, 1.0), xy(15.0, 17.0)),
+                1.0,
+                s,
+                egui::StrokeKind::Inside,
+            );
+            line(xy(6.0, 1.0), xy(6.0, 17.0));
+            line(xy(8.0, 11.0), xy(10.5, 5.0));
+            line(xy(10.5, 5.0), xy(13.0, 11.0));
+            line(xy(9.0, 9.0), xy(12.0, 9.0));
+        }
+        Icon::Microphone => {
+            p.rect_stroke(
+                Rect::from_min_max(xy(6.0, 1.0), xy(12.0, 12.0)),
+                3.0,
+                s,
+                egui::StrokeKind::Inside,
+            );
+            p.add(egui::Shape::line(
+                vec![
+                    xy(3.0, 8.0),
+                    xy(3.0, 11.0),
+                    xy(5.0, 14.0),
+                    xy(9.0, 15.0),
+                    xy(13.0, 14.0),
+                    xy(15.0, 11.0),
+                    xy(15.0, 8.0),
+                ],
+                s,
+            ));
+            line(xy(9.0, 15.0), xy(9.0, 18.0));
+        }
+        Icon::Bell => {
+            p.add(egui::Shape::closed_line(
+                vec![
+                    xy(3.0, 13.0),
+                    xy(5.0, 10.0),
+                    xy(5.0, 6.0),
+                    xy(7.0, 3.0),
+                    xy(11.0, 3.0),
+                    xy(13.0, 6.0),
+                    xy(13.0, 10.0),
+                    xy(15.0, 13.0),
+                ],
+                s,
+            ));
+            line(xy(7.0, 16.0), xy(11.0, 16.0));
+            line(xy(9.0, 1.0), xy(9.0, 3.0));
+        }
+        Icon::Accessibility => {
+            p.circle_stroke(xy(9.0, 2.5), 1.8, s);
+            line(xy(2.0, 7.0), xy(16.0, 7.0));
+            line(xy(9.0, 7.0), xy(9.0, 11.0));
+            line(xy(9.0, 11.0), xy(5.0, 17.0));
+            line(xy(9.0, 11.0), xy(13.0, 17.0));
+        }
+        Icon::Translate => {
+            line(xy(1.0, 4.0), xy(11.0, 4.0));
+            line(xy(6.0, 1.0), xy(6.0, 4.0));
+            line(xy(9.0, 4.0), xy(7.0, 8.0));
+            line(xy(7.0, 8.0), xy(2.0, 12.0));
+            line(xy(3.0, 6.0), xy(9.0, 11.0));
+            line(xy(10.0, 17.0), xy(14.0, 7.0));
+            line(xy(14.0, 7.0), xy(18.0, 17.0));
+            line(xy(12.0, 14.0), xy(16.0, 14.0));
+        }
+        Icon::Compare => {
+            for x in [1.0, 10.0] {
+                p.rect_stroke(
+                    Rect::from_min_max(xy(x, 2.0), xy(x + 7.0, 16.0)),
+                    0.5,
+                    s,
+                    egui::StrokeKind::Inside,
+                );
+                line(xy(x + 2.0, 6.0), xy(x + 5.0, 6.0));
+                line(xy(x + 2.0, 10.0), xy(x + 5.0, 10.0));
+            }
+        }
         Icon::Copy => {
             p.rect_stroke(
                 Rect::from_min_max(xy(5.0, 2.0), xy(15.0, 14.0)),

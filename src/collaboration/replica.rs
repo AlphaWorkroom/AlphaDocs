@@ -136,7 +136,9 @@ impl Replica {
         let tabs: Vec<_> = (0..clean.tabs.len()).map(|i| json!({
             "id": clean.tabs[i].id, "title": clean.tabs[i].title, "blocks": clean.tab_blocks(i)
         })).collect();
-        let value = normalize(json!({"title":clean.title,"page":clean.page,"tabs":tabs}));
+        let value = normalize(
+            json!({"title":clean.title,"page":clean.page,"citations":clean.citations,"tabs":tabs}),
+        );
         self.undo.reset();
         let mut txn = self.doc.transact_mut_with("local");
         reconcile_map(
@@ -149,6 +151,9 @@ impl Replica {
     }
     /// Ordinary edits serialize only changed blocks, keeping untouched rich text/media shared.
     pub fn commit_delta(&mut self, before: &Document, after: &Document) -> Result<(), String> {
+        if before.citations != after.citations {
+            return self.commit(after);
+        }
         if before.tabs.len() != after.tabs.len()
             || before
                 .tabs
@@ -241,6 +246,12 @@ impl Replica {
             serde_json::from_value(value["title"].clone()).map_err(|_| "Missing shared title")?;
         doc.page = serde_json::from_value(value["page"].clone())
             .map_err(|_| "Invalid shared page setup")?;
+        doc.citations = if value["citations"].is_null() {
+            Default::default()
+        } else {
+            serde_json::from_value(value["citations"].clone())
+                .map_err(|_| "Invalid shared citations")?
+        };
         let mut projection = HashMap::new();
         doc.tabs = vec![];
         for tab in value["tabs"]

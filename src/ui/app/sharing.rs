@@ -304,6 +304,14 @@ impl AlphaDocs {
         }
     }
     pub(super) fn nearby_prompt(&mut self, ctx: &Context) {
+        if !self.prefs.nearby_invites {
+            if let Some(n) = &self.sharing.nearby
+                && let Ok(mut s) = n.state.lock()
+            {
+                s.offers.clear();
+            }
+            return;
+        }
         let offer = self
             .sharing
             .nearby

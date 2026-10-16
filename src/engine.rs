@@ -2,6 +2,7 @@ use crate::model::*;
 mod annotations;
 mod operations;
 mod shared;
+mod typing;
 pub use operations::ClipboardContent;
 use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
@@ -14,6 +15,7 @@ struct Snapshot {
     replace_len: usize,
     blocks: Vec<Block>,
     page: Option<PageSetup>,
+    citations: Option<SharedVec<crate::writing::Citation>>,
     title: Option<String>,
     starred: Option<bool>,
     caret: Position,
@@ -46,6 +48,7 @@ impl Snapshot {
             replace_len: after.blocks.len() - start - suffix,
             blocks: before.blocks[start..before.blocks.len() - suffix].to_vec(),
             page: (before.page != after.page).then(|| before.page.clone()),
+            citations: (before.citations != after.citations).then(|| before.citations.clone()),
             title: (before.title != after.title).then(|| before.title.clone()),
             starred: (before.starred != after.starred).then_some(before.starred),
             caret,
@@ -117,11 +120,15 @@ impl Editor {
             replace_len: inserted_len,
             blocks,
             page: s.page.as_ref().map(|_| self.doc.page.clone()),
+            citations: s.citations.as_ref().map(|_| self.doc.citations.clone()),
             title: s.title.as_ref().map(|_| self.doc.title.clone()),
             starred: s.starred.map(|_| self.doc.starred),
             caret: self.caret,
             anchor: self.anchor,
         };
+        if let Some(citations) = s.citations {
+            self.doc.citations = citations;
+        }
         if let Some(page) = s.page {
             self.doc.page = page;
         }

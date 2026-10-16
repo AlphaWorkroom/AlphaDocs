@@ -108,6 +108,38 @@ fn report(doc: &Document, format: Format) -> Report {
                 .into(),
         );
     }
+    if matches!(format, Format::Odt | Format::Rtf) {
+        if doc.page.line_numbers != LineNumbering::Off {
+            notices.push(format!(
+                "{} does not retain AlphaDocs document line numbering.",
+                if format == Format::Odt {
+                    "OpenDocument"
+                } else {
+                    "RTF"
+                }
+            ));
+        }
+        if !doc.citations.is_empty() {
+            notices.push(format!(
+                "The AlphaDocs citation source library is not included in {}; citation text already inserted into the document is retained.",
+                if format == Format::Odt {
+                    "OpenDocument"
+                } else {
+                    "RTF"
+                }
+            ));
+        }
+        if doc.page.pageless {
+            notices.push(format!(
+                "{} uses paged layout; the document's pageless canvas setting is not retained.",
+                if format == Format::Odt {
+                    "OpenDocument"
+                } else {
+                    "RTF"
+                }
+            ));
+        }
+    }
     let paragraphs = doc
         .tabs
         .iter()

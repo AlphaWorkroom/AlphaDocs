@@ -5,6 +5,17 @@ impl AlphaDocs {
         if self.home || self.dialog.is_some() || self.feature_search_open {
             return;
         }
+        for (key, action) in [
+            (Key::C, Action::Count),
+            (Key::Y, Action::Tool(tools::Tool::Dictionary)),
+        ] {
+            if ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, key)
+            }) {
+                self.execute(action, ctx);
+                return;
+            }
+        }
         if ctx
             .input_mut(|i| i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::S))
         {
@@ -156,7 +167,7 @@ impl AlphaDocs {
             match event {
                 Event::Text(t) if !self.session.viewing => {
                     if self.ime_preedit.is_empty() {
-                        self.session.editor.insert(&t);
+                        self.session.editor.type_text(&t, &self.prefs.typing);
                         edited = true;
                     }
                 }

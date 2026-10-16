@@ -449,6 +449,28 @@ pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
         rgb(doc.page.color)
     );
     let xml = xml.replace("<w:document ", &format!("<w:document alphadocs:activeTab=\"{}\" xmlns:alphadocs=\"urn:alphadocs:image:v1\" xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" mc:Ignorable=\"alphadocs\" ", esc(&doc.tabs[doc.active_tab].id)));
+    let xml = xml.replace(
+        "<w:document ",
+        &format!(
+            "<w:document alphadocs:citations=\"{}\" ",
+            esc(&serde_json::to_string(&doc.citations).map_err(|e| e.to_string())?)
+        ),
+    );
+    let xml = if doc.page.line_numbers != LineNumbering::Off {
+        xml.replace(
+            "</w:sectPr>",
+            &format!(
+                "<w:lnNumType w:countBy=\"1\" w:distance=\"120\" w:restart=\"{}\"/></w:sectPr>",
+                if doc.page.line_numbers == LineNumbering::EachPage {
+                    "newPage"
+                } else {
+                    "continuous"
+                }
+            ),
+        )
+    } else {
+        xml
+    };
     writer.relation("styles", "styles.xml");
     writer.relation("numbering", "numbering.xml");
     let rels=format!("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{}</Relationships>",writer.rels.iter().map(|(id,typ,target)|format!("<Relationship Id=\"{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{typ}\" Target=\"{}\"{}/>",esc(target),if typ=="hyperlink"{" TargetMode=\"External\""}else{""})).collect::<String>());
@@ -1253,12 +1275,18 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
                         .and_then(|v| v.parse::<f32>().ok())
                         .unwrap_or(16838.0)
                         / 20.0;
-                    doc.page.landscape = w > h;
-                    let min = w.min(h);
-                    doc.page.paper = if (min - 612.0).abs() < 5.0 {
-                        Paper::Letter
+                    doc.page.landscape = sz.attr("orient").map_or(w > h, |s| s == "landscape");
+                    doc.page.paper = if doc.page.landscape {
+                        Paper::from_size(h, w)
                     } else {
-                        Paper::A4
+                        Paper::from_size(w, h)
+                    };
+                }
+                if let Some(line) = n.child("lnNumType") {
+                    doc.page.line_numbers = if line.attr("restart") == Some("newPage") {
+                        LineNumbering::EachPage
+                    } else {
+                        LineNumbering::Continuous
                     };
                 }
                 if let Some(m) = n.child("pgMar") {
@@ -1361,6 +1389,13 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
         && let Some(index) = doc.tabs.iter().position(|t| t.id == id)
     {
         doc.select_tab(index);
+    }
+    if let Some(value) = root
+        .descendant("document")
+        .and_then(|n| n.attr("citations"))
+    {
+        doc.citations =
+            serde_json::from_str(value).map_err(|_| "Invalid AlphaDocs citation metadata")?;
     }
     doc.validate()?;
     warnings.sort();
@@ -1475,6 +1510,59 @@ mod tests {
         assert_eq!(p.chars[0].style.font, "Noto Sans Mono");
         assert!(p.keep_together);
         assert!(!p.widow_control);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn all_paper_sizes_and_orientations_roundtrip_with_line_number_settings() {
+        for paper in Paper::STANDARD.into_iter().chain([Paper::Custom {
+            width: 703.25,
+            height: 911.75,
+        }]) {
+            for landscape in [false, true] {
+                let mut doc = Document::new("Page geometry");
+                doc.page.paper = paper;
+                doc.page.landscape = landscape;
+                doc.page.margins = [36.0, 42.0, 48.0, 54.0];
+                doc.page.line_numbers = if landscape {
+                    LineNumbering::EachPage
+                } else {
+                    LineNumbering::Continuous
+                };
+                doc.blocks = vec![Block::Paragraph(Paragraph::from_text("Geometry"))];
+                let path = std::env::temp_dir()
+                    .join(format!("alphadocs-paper-{}-{}.docx", doc.id, landscape));
+                export(&doc, &path).unwrap();
+                let (loaded, warnings) = import(&path).unwrap();
+                assert!(warnings.is_empty(), "{paper:?}: {warnings:?}");
+                let (expected_width, expected_height) = doc.page.size();
+                let (actual_width, actual_height) = loaded.page.size();
+                assert!((actual_width - expected_width).abs() < 0.1, "{paper:?}");
+                assert!((actual_height - expected_height).abs() < 0.1, "{paper:?}");
+                assert_eq!(loaded.page.paper, paper, "{paper:?}");
+                assert_eq!(loaded.page.landscape, landscape);
+                assert_eq!(loaded.page.margins, doc.page.margins);
+                assert_eq!(loaded.page.line_numbers, doc.page.line_numbers);
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn citations_roundtrip_in_alpha_docs_metadata() {
+        let mut doc = Document::new("Citation metadata");
+        doc.citations.push(crate::writing::Citation {
+            author: "Ada Lovelace".into(),
+            title: "Notes".into(),
+            year: "1843".into(),
+            publisher: "Analytical Engine".into(),
+            url: "https://example.com".into(),
+        });
+        let path = std::env::temp_dir().join(format!("alphadocs-citations-{}.docx", doc.id));
+        export(&doc, &path).unwrap();
+        let (loaded, warnings) = import(&path).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(loaded.citations, doc.citations);
         std::fs::remove_file(path).unwrap();
     }
     #[test]
