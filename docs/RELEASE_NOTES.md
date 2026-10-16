@@ -5,6 +5,8 @@
 - Help now groups shortcuts by task with separate, plain-language descriptions. Help and the GitHub page link to the owner's feedback/bug-report form; nothing is submitted automatically.
 - Opt-in nearby-device discovery and encrypted live-editing invitations. Choose a device, send an edit/view invitation and wait for the receiver to choose Join. Copy/paste invitations remain available when discovery is blocked.
 - A clearer Working together roster shows names and content tabs; larger, staggered caret/selection badges use matching colours.
+- Box-drawing characters and arrows now use the bundled symbol fallback in the editor and PDF. Pasted text diagrams preserve spaces, use a real monospace font and fit the available column using measured advances. Known arrow entities are repaired on paste.
+- Proofing skips web addresses and linked text, and recognises hyphenated prefixes such as Pre-Launch while still checking the following word.
 
 macOS apps remain ad-hoc signed, **not Developer ID signed or Apple-notarised**. A DMG does not bypass Gatekeeper. The installation guide includes Apple's per-app Open Anyway steps. Apple signing/notarisation credentials are required to remove the unidentified-publisher warning.
 

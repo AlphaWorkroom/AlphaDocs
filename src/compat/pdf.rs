@@ -76,6 +76,15 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
     let default_key = fonts::key(&TextStyle::default());
     let mut styles = vec![
         TextStyle::default(),
+        TextStyle {
+            font: "Noto Sans Mono".into(),
+            ..Default::default()
+        },
+        TextStyle {
+            font: "Noto Sans Mono".into(),
+            bold: true,
+            ..Default::default()
+        },
         doc.page.header.style.clone(),
         doc.page.footer.style.clone(),
     ];
@@ -202,8 +211,13 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
             let mut start = line.start;
             while start < line.end {
                 let s = &p.chars[start].style;
+                let key = fonts::symbol_key(s, p.chars[start].ch);
                 let mut end = start + 1;
-                while end < line.end && p.chars[end].style == *s && p.chars[end].ch != '\t' {
+                while end < line.end
+                    && p.chars[end].style == *s
+                    && p.chars[end].ch != '\t'
+                    && fonts::symbol_key(s, p.chars[end].ch) == key
+                {
                     end += 1;
                 }
                 let x = line.rect.left() + line.x(start);
@@ -223,7 +237,6 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                     );
                 }
                 let text: String = p.chars[start..end].iter().map(|c| c.ch).collect();
-                let key = fonts::key(s);
                 let face = &faces[&key];
                 let font = harfrust::FontRef::from_index(face.font.as_ref(), face.index)
                     .map_err(|e| e.to_string())?;
@@ -343,6 +356,27 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pdf_symbol_fallback_preserves_unicode() {
+        let mut doc = Document::new("PDF symbols");
+        doc.blocks = vec![Block::Paragraph(Paragraph::from_text("┌─┐│├┤└┘→←↑↓↔"))];
+        let ctx = eframe::egui::Context::default();
+        fonts::install(&ctx);
+        let mut bytes = Vec::new();
+        let mut out = ctx.run_ui(Default::default(), |_| {
+            bytes = encode(&doc, &Layout::measure(&ctx, &doc)).unwrap();
+        });
+        out.textures_delta.clear();
+        let parsed =
+            PdfDocument::parse(&bytes, &PdfParseOptions::default(), &mut Vec::new()).unwrap();
+        let extracted = parsed
+            .pages
+            .iter()
+            .flat_map(|p| p.extract_text(&parsed.resources))
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(extracted.contains("┌─┐│├┤└┘→←↑↓↔"), "{extracted}");
+    }
     #[test]
     fn pdf_preserves_measured_pages_fonts_and_links() {
         let mut d = Document::new("PDF test");

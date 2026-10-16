@@ -32,7 +32,7 @@ impl AlphaDocs {
             .color(p.muted),
         );
         ui.add_space(12.0);
-        egui::ScrollArea::vertical().max_height((ui.ctx().content_rect().height()-380.0).clamp(180.0,520.0)).show(ui,|ui| {
+        egui::ScrollArea::vertical().id_salt("alphadocs-help-topics-v2").max_height((ui.ctx().content_rect().height()-380.0).clamp(180.0,520.0)).show(ui,|ui| {
             keyboard_help(ui);
             for (title,body) in [
                 ("Modes and compact menus", "The pencil/eye selector at the right of either toolbar switches Editing and Viewing. Viewing allows reading, selection, copying and printing while document changes are disabled. Suggesting is visibly unavailable until tracked changes are implemented. The adjacent chevron or Ctrl+Shift+F hides/shows the document title and menu header. The toolbar, ruler, document tabs and native window controls stay available. The compact preference is remembered; the chevron always restores the menus."),
@@ -64,7 +64,7 @@ impl AlphaDocs {
 pub(super) const FEEDBACK_FORM: &str = "https://docs.google.com/forms/d/e/1FAIpQLSczvu4GiVbR1PXFWfW_arILYPqBVQKb5kq7uisTbHpCYZ60KQ/viewform?usp=publish-editor";
 
 fn keyboard_help(ui: &mut Ui) {
-    egui::CollapsingHeader::new("Keyboard shortcuts").default_open(true).show_unindented(ui, |ui| {
+    egui::CollapsingHeader::new("Keyboard shortcuts").id_salt("task-keyboard-help-v2").default_open(true).show_unindented(ui, |ui| {
         ui.label("Click inside the document first. Hold the modifier keys, press the last key once, then release. On Mac, Cmd means the Command key; Option means the Alt/Option key.");
         for (group, rows) in [
             ("Documents", vec![

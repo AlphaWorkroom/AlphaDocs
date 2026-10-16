@@ -1,4 +1,18 @@
 use super::*;
+#[test]
+fn diagram_paste_and_arrow_repair_are_one_undoable_ui_action() {
+    let (ctx, mut app) = editor();
+    app.session.editor.insert("Original text");
+    let original = app.session.editor.doc.clone();
+    app.session.editor.select_all();
+    ctx.memory_mut(|m| m.request_focus(Id::new("document_canvas")));
+    let diagram = "┌─────────────────────┐\n│  Pre-Launch &rightarrow&  │\n└─────────────────────┘";
+    image_frame(&ctx, &mut app, vec![Event::Paste(diagram.into())]);
+    assert!(app.session.editor.doc.text().contains("Pre-Launch →"));
+    assert!(app.session.editor.doc.blocks.iter().all(|b| matches!(b, Block::Paragraph(p) if p.chars.iter().all(|c| c.style.font == "Noto Sans Mono"))));
+    image_frame(&ctx, &mut app, vec![key(Key::Z, egui::Modifiers::COMMAND)]);
+    assert_eq!(app.session.editor.doc, original);
+}
 fn mac_command() -> egui::Modifiers {
     egui::Modifiers {
         mac_cmd: true,

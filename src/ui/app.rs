@@ -343,28 +343,25 @@ impl AlphaDocs {
                 .editor
                 .paste_fragment_replacing_image(fragment, self.image_block);
         } else if !text.is_empty() {
-            if let Some(block) = self.image_block {
-                let blocks = text
-                    .replace("\r\n", "\n")
-                    .split('\n')
-                    .map(|text| {
-                        let mut p = Paragraph::from_text(text);
-                        p.style = self.session.editor.typing.clone();
-                        for c in &mut p.chars {
-                            c.style = p.style.clone();
-                        }
-                        Block::Paragraph(p)
-                    })
-                    .collect();
-                self.session.editor.paste_fragment_replacing_image(
-                    &ClipboardContent {
-                        text: text.into(),
-                        blocks,
-                    },
-                    Some(block),
+            if self.image_block.is_some() || crate::clipboard::box_diagram(text) {
+                let page = &self.session.editor.doc.page;
+                let columns = page.columns.max(1) as f32;
+                let content = crate::clipboard::plain_content(
+                    text,
+                    &self.session.editor.typing,
+                    (page.size().0
+                        - page.margins[2]
+                        - page.margins[3]
+                        - page.column_gap * (columns - 1.0))
+                        / columns,
                 );
+                self.session
+                    .editor
+                    .paste_fragment_replacing_image(&content, self.image_block);
             } else {
-                self.session.editor.paste(text, true);
+                self.session
+                    .editor
+                    .paste(&crate::clipboard::arrow_text(text), true);
             }
         }
         self.paste_plain = false;

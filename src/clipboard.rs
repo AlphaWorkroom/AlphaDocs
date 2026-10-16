@@ -11,6 +11,96 @@ pub struct Import {
 const MAX_BYTES: usize = 32 * 1024 * 1024;
 const NATIVE_FORMAT: &str = "AlphaDocs structured fragment v1";
 
+pub fn box_diagram(text: &str) -> bool {
+    text.chars()
+        .filter(|c| matches!(*c as u32, 0x2500..=0x257f))
+        .take(2)
+        .count()
+        == 2
+}
+/// Repair known arrow spellings from text producers, never unknown entities.
+/// HTML itself is decoded once by the HTML parser; code elements bypass this repair.
+pub fn arrow_text(text: &str) -> String {
+    arrow_entities(text, &[';', '&'])
+}
+fn arrow_entities(text: &str, endings: &[char]) -> String {
+    let mut result = text.to_owned();
+    if !text.contains('&') {
+        return result;
+    }
+    for (name, arrow) in [
+        ("rightarrow", "→"),
+        ("rarr", "→"),
+        ("leftarrow", "←"),
+        ("larr", "←"),
+        ("uparrow", "↑"),
+        ("uarr", "↑"),
+        ("downarrow", "↓"),
+        ("darr", "↓"),
+        ("leftrightarrow", "↔"),
+        ("harr", "↔"),
+        ("Rightarrow", "⇒"),
+        ("Leftarrow", "⇐"),
+    ] {
+        for ending in endings {
+            let entity = format!("&{name}{ending}");
+            if result.contains(&entity) {
+                result = result.replace(&entity, arrow);
+            }
+        }
+    }
+    result
+}
+fn format_diagrams(blocks: &mut [Block], width: f32) {
+    // Fit using actual font advances. A common point size keeps adjacent rows aligned.
+    let mut factor = 1.0_f32;
+    for block in blocks.iter() {
+        if let Block::Paragraph(p) = block
+            && box_diagram(&p.text())
+        {
+            for row in p.text().split('\n') {
+                let measured = crate::fonts::mono_width(row, p.style.size, p.style.bold);
+                factor = factor.min((width.max(1.0) - 1.0).max(1.0) / measured.max(1.0));
+            }
+        }
+    }
+    for block in blocks {
+        if let Block::Paragraph(p) = block
+            && box_diagram(&p.text())
+        {
+            p.style.font = "Noto Sans Mono".into();
+            p.style.size = (p.style.size * factor).max(1.0);
+            p.alignment = Alignment::Left;
+            p.before = 0.0;
+            p.after = 0.0;
+            // Bundled Mono regular/bold: U+2502 spans 1,225 font units;
+            // ascent - descent + leading is 1,362. Match adjoining box strokes.
+            p.line_spacing = 1225.0 / 1362.0;
+            p.first_indent = 0.0;
+            for c in &mut p.chars {
+                c.style.font = p.style.font.clone();
+                c.style.size = p.style.size;
+            }
+        }
+    }
+}
+pub fn plain_content(text: &str, style: &TextStyle, width: f32) -> ClipboardContent {
+    let text = arrow_text(&text.replace("\r\n", "\n").replace('\r', "\n"));
+    let mut blocks: Vec<_> = text
+        .split('\n')
+        .map(|line| {
+            let mut p = Paragraph::from_text(line);
+            p.style = style.clone();
+            for c in &mut p.chars {
+                c.style = style.clone();
+            }
+            Block::Paragraph(p)
+        })
+        .collect();
+    format_diagrams(&mut blocks, width);
+    ClipboardContent { text, blocks }
+}
+
 #[cfg(not(test))]
 pub fn write(content: &ClipboardContent) -> Result<(), String> {
     let bytes = serde_json::to_vec(content).map_err(|e| e.to_string())?;
@@ -81,20 +171,7 @@ impl Capture {
                         "This RTF clipboard has no supported text or image representation".into(),
                     );
                 }
-                let blocks = text
-                    .replace("\r\n", "\n")
-                    .replace('\r', "\n")
-                    .split('\n')
-                    .map(|text| {
-                        let mut p = Paragraph::from_text(text);
-                        p.style = style.clone();
-                        for c in &mut p.chars {
-                            c.style = style.clone();
-                        }
-                        Block::Paragraph(p)
-                    })
-                    .collect();
-                Ok(Import{content:ClipboardContent{text,blocks},warnings:vec!["RTF-only content pasted as plain text; copy HTML to retain tables and media".into()]})
+                Ok(Import{content:plain_content(&text, style, width),warnings:vec!["RTF-only content pasted as plain text; copy HTML to retain tables and media".into()]})
             }
             Self::Native(bytes) => {
                 let content: ClipboardContent =
@@ -150,6 +227,7 @@ struct Parser {
     bitmap: Option<Vec<u8>>,
     width: f32,
     preserve: bool,
+    literal: bool,
     rules: std::sync::Arc<Vec<(Selector, String)>>,
     deadline: std::time::Instant,
     requests: usize,
@@ -169,13 +247,19 @@ impl Parser {
             return;
         }
         if let Node::Text(text) = node.value() {
+            let text = if self.literal {
+                text.to_string()
+            } else {
+                arrow_entities(text, &['&'])
+            };
+            let preserve = self.preserve || box_diagram(&text);
             for ch in text.chars() {
-                let ch = if !self.preserve && ch.is_whitespace() && ch != '\u{a0}' {
+                let ch = if !preserve && ch.is_whitespace() && ch != '\u{a0}' {
                     ' '
                 } else {
                     ch
                 };
-                if !self.preserve
+                if !preserve
                     && ch == ' '
                     && self
                         .paragraph
@@ -200,6 +284,9 @@ impl Parser {
             return;
         }
         let mut style = style.clone();
+        if matches!(name, "pre" | "code") {
+            style.font = "Noto Sans Mono".into();
+        }
         if let Some(h) = name
             .strip_prefix('h')
             .and_then(|v| v.parse::<u8>().ok())
@@ -345,6 +432,7 @@ impl Parser {
                         bitmap: None,
                         width: self.width,
                         preserve: self.preserve,
+                        literal: self.literal,
                         rules: self.rules.clone(),
                         deadline: self.deadline,
                         requests: self.requests,
@@ -448,6 +536,8 @@ impl Parser {
             self.paragraph.heading = h;
         }
         let preserve = self.preserve;
+        let literal = self.literal;
+        self.literal |= name == "code";
         self.preserve |= name == "pre";
         for entry in declarations.split(';') {
             if let Some((key, value)) = entry.split_once(':') {
@@ -502,6 +592,7 @@ impl Parser {
             self.walk(child, &style, depth + 1);
         }
         self.preserve = preserve;
+        self.literal = literal;
         if block {
             self.flush(name == "p");
         }
@@ -585,6 +676,7 @@ pub fn parse_html(
         bitmap,
         width,
         preserve: false,
+        literal: false,
         rules,
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(8),
         requests: 0,
@@ -595,6 +687,7 @@ pub fn parse_html(
     let _ = style;
     parser.walk(*tree.root_element(), &TextStyle::default(), 0);
     parser.flush(false);
+    format_diagrams(&mut parser.blocks, width);
     let text = parser
         .blocks
         .iter()
@@ -665,6 +758,53 @@ fn raster_svg(source: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
     use crate::engine::Editor;
+    #[test]
+    fn diagrams_keep_spaces_use_measured_monospace_and_fit_the_page() {
+        let diagram = format!(
+            "┌{}┐\n│{:^72}│\n└{}┘",
+            "─".repeat(72),
+            "Pre-Launch → Post-Launch",
+            "─".repeat(72)
+        );
+        let content = plain_content(&diagram, &TextStyle::default(), 451.0);
+        assert_eq!(content.text, diagram);
+        let mut doc = Document::new("Diagram");
+        doc.blocks = content.blocks;
+        let ctx = eframe::egui::Context::default();
+        crate::fonts::install(&ctx);
+        let mut out = ctx.run_ui(Default::default(), |_| {
+            let mut widths = vec![];
+            for block in &doc.blocks {
+                let Block::Paragraph(p) = block else { panic!() };
+                assert_eq!(p.style.font, "Noto Sans Mono");
+                assert_eq!(p.after, 0.0);
+                let galley = crate::layout::shape(&ctx, p, 451.0);
+                assert_eq!(galley.rows.len(), 1);
+                assert!(galley.size().x <= 451.0);
+                widths.push(galley.size().x);
+            }
+            assert!(widths.iter().all(|w| (w - widths[0]).abs() < 0.1));
+            let layout = crate::layout::Layout::measure(&ctx, &doc);
+            let bytes = crate::compat::pdf::encode(&doc, &layout).unwrap();
+            assert!(bytes.starts_with(b"%PDF"));
+        });
+        out.textures_delta.clear();
+        let html = format!(
+            "<pre>{diagram}</pre><p>&rightarrow; &rightarrow&amp; &amp;rightarrow;</p><code>&amp;rightarrow&amp;</code>"
+        );
+        let imported = parse_html(&html, &TextStyle::default(), 451.0, None).unwrap();
+        assert!(imported.content.text.starts_with(&diagram));
+        assert!(
+            imported.content.text.contains("→ → &rightarrow;"),
+            "{}",
+            imported.content.text
+        );
+        assert!(imported.content.text.ends_with("&rightarrow&"));
+        assert_eq!(
+            arrow_text("&rightarrow& &leftarrow; &unknown;"),
+            "→ ← &unknown;"
+        );
+    }
     fn fixture() -> Import {
         let png = include_bytes!("../assets/alphadocs-icon.png");
         let html = format!(

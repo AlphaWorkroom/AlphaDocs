@@ -55,6 +55,7 @@ fn check_document(
             continue;
         };
         let text = p.text();
+        let network = network_ranges(&text);
         let mut scanned_byte = 0;
         let mut scalar_offset = 0;
         let words: Vec<_> = text
@@ -69,9 +70,42 @@ fn check_document(
             })
             .collect();
         for (index, &(byte, word, start)) in words.iter().enumerate() {
+            if network.iter().any(|r| r.contains(&byte))
+                || p.chars
+                    .iter()
+                    .skip(start)
+                    .take(word.chars().count())
+                    .any(|c| c.style.link.is_some())
+            {
+                continue;
+            }
             let end = start + word.chars().count();
             let normal = word.replace('’', "'");
+            let prefix = words.get(index + 1).is_some_and(|&(next, _, _)| {
+                matches!(
+                    normal.to_ascii_lowercase().as_str(),
+                    "pre"
+                        | "post"
+                        | "non"
+                        | "re"
+                        | "co"
+                        | "mid"
+                        | "sub"
+                        | "super"
+                        | "anti"
+                        | "pro"
+                        | "inter"
+                        | "intra"
+                        | "multi"
+                        | "over"
+                        | "under"
+                ) && matches!(
+                    &text[byte + word.len()..next],
+                    "-" | "\u{2010}" | "\u{2011}"
+                )
+            });
             if !ignored.contains(&normal.to_lowercase())
+                && !prefix
                 && !normal.chars().any(char::is_numeric)
                 && !dictionary.check(&normal)
             {
@@ -179,6 +213,44 @@ fn check_document(
     issues.sort_by_key(|i| (i.address, i.start, !i.grammar));
     Ok(issues)
 }
+/// Byte spans are used only for lexical exclusion; issue positions remain scalars.
+fn network_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut offset = 0;
+    for part in text.split_inclusive(char::is_whitespace) {
+        let token = part.trim().trim_matches(|c: char| {
+            matches!(
+                c,
+                '(' | ')' | '[' | ']' | '<' | '>' | '"' | '\'' | ',' | ';' | '!' | '?' | '.'
+            )
+        });
+        let host = token.split(['/', '?', '#']).next().unwrap_or("");
+        let domain = host
+            .rsplit('@')
+            .next()
+            .unwrap_or(host)
+            .split(':')
+            .next()
+            .unwrap_or("");
+        let labels: Vec<_> = domain.split('.').collect();
+        let valid_domain = labels.len() >= 2
+            && labels.iter().all(|s| {
+                !s.is_empty()
+                    && s.len() <= 63
+                    && !s.starts_with('-')
+                    && !s.ends_with('-')
+                    && s.chars().all(|c| c.is_alphanumeric() || c == '-')
+            })
+            && labels
+                .last()
+                .is_some_and(|s| s.len() >= 2 && s.chars().all(char::is_alphabetic));
+        if token.starts_with("https://") || token.starts_with("http://") || valid_domain {
+            ranges.push(offset..offset + part.len());
+        }
+        offset += part.len();
+    }
+    ranges
+}
 pub fn replace(editor: &mut Editor, issue: &Issue, replacement: &str) -> bool {
     let Some(p) = editor.doc.paragraph(issue.address) else {
         return false;
@@ -211,6 +283,39 @@ pub fn replace(editor: &mut Editor, issue: &Issue, replacement: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn domains_links_and_hyphenated_prefixes_are_not_spelling_errors() {
+        let mut doc = Document::new("Proofing exclusions");
+        doc.blocks = vec![Block::Paragraph(Paragraph::from_text(
+            "😀 northernbeachespokemon.com.au https://example.org/mispeling person@example.com Pre-Launch pre-launch Post‑Launch Pre-mispeling teh",
+        ))];
+        let issues = markers(&doc, &[]).unwrap();
+        assert_eq!(
+            issues
+                .iter()
+                .map(|i| i.original.as_str())
+                .collect::<Vec<_>>(),
+            ["mispeling", "teh"]
+        );
+        for issue in &issues {
+            assert_eq!(
+                doc.paragraph(issue.address)
+                    .unwrap()
+                    .text()
+                    .chars()
+                    .skip(issue.start)
+                    .take(issue.end - issue.start)
+                    .collect::<String>(),
+                issue.original
+            );
+        }
+        let mut linked = Paragraph::from_text("mispeling");
+        for c in &mut linked.chars {
+            c.style.link = Some("https://example.org".into());
+        }
+        doc.blocks = vec![Block::Paragraph(linked)];
+        assert!(markers(&doc, &[]).unwrap().is_empty());
+    }
     #[test]
     fn offline_spelling_grammar_unicode_table_replacement_and_undo() {
         let mut doc = Document::new("Proofing");

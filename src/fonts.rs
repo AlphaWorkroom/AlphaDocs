@@ -50,6 +50,9 @@ pub const FONTS: &[(&str, &[u8])] = &[
     ),
 ];
 fn bundled_key(s: &TextStyle) -> String {
+    if s.font == "Noto Sans Mono" {
+        return if s.bold { "Mono-Bold" } else { "Mono" }.into();
+    }
     format!(
         "{}{}",
         if s.font == "Noto Serif" {
@@ -134,12 +137,85 @@ pub fn key(s: &TextStyle) -> String {
     if s.font == "Noto Emoji" {
         return "Emoji".into();
     }
-    if s.font == "Noto Sans" || s.font == "Noto Serif" {
+    if matches!(
+        s.font.as_str(),
+        "Noto Sans" | "Noto Serif" | "Noto Sans Mono"
+    ) {
         return bundled_key(s);
     }
     query(s)
         .map(|id| format!("System-{id:?}"))
         .unwrap_or_else(|| bundled_key(s))
+}
+/// Match the renderer's bundled symbol fallback when embedding PDF glyphs.
+/// Cache coverage probes, rather than shaping every symbol on every repaint.
+pub fn symbol_key(s: &TextStyle, ch: char) -> String {
+    let primary = key(s);
+    if !matches!(ch as u32, 0x2190..=0x21ff | 0x2500..=0x259f | 0x27f0..=0x27ff | 0x2900..=0x297f) {
+        return primary;
+    }
+    static COVERAGE: OnceLock<Mutex<HashMap<(String, char), String>>> = OnceLock::new();
+    let mut coverage = COVERAGE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    coverage
+        .entry((primary.clone(), ch))
+        .or_insert_with(|| {
+            let fallback = if s.bold { "Mono-Bold" } else { "Mono" };
+            if !has_glyph(&face(s), ch)
+                && FONTS
+                    .iter()
+                    .find(|(name, _)| *name == fallback)
+                    .is_some_and(|(_, bytes)| has_glyph(&FontData::from_static(bytes), ch))
+            {
+                fallback.into()
+            } else {
+                primary
+            }
+        })
+        .clone()
+}
+fn has_glyph(data: &FontData, ch: char) -> bool {
+    let Ok(font) = harfrust::FontRef::from_index(data.font.as_ref(), data.index) else {
+        return false;
+    };
+    let data = harfrust::ShaperData::new(&font);
+    let shaper = data.shaper(&font).build();
+    let mut buffer = harfrust::UnicodeBuffer::new();
+    buffer.push_str(ch.encode_utf8(&mut [0; 4]));
+    buffer.guess_segment_properties();
+    shaper
+        .shape(buffer, harfrust::ShapeOptions::new())
+        .glyph_infos()
+        .iter()
+        .all(|g| g.glyph_id != 0)
+}
+
+/// Actual bundled-face advance, in points, for fitting pasted text diagrams.
+pub fn mono_width(text: &str, size: f32, bold: bool) -> f32 {
+    let style = TextStyle {
+        font: "Noto Sans Mono".into(),
+        size,
+        bold,
+        ..Default::default()
+    };
+    let data = face(&style);
+    let font =
+        harfrust::FontRef::from_index(data.font.as_ref(), data.index).expect("Bundled mono font");
+    let data = harfrust::ShaperData::new(&font);
+    let shaper = data.shaper(&font).build();
+    let mut buffer = harfrust::UnicodeBuffer::new();
+    buffer.push_str(text);
+    buffer.guess_segment_properties();
+    shaper
+        .shape(buffer, harfrust::ShapeOptions::new())
+        .glyph_positions()
+        .iter()
+        .map(|p| p.x_advance as f32)
+        .sum::<f32>()
+        * size
+        / shaper.units_per_em() as f32
 }
 /// The exact face used by both the native renderer and PDF shaper. System faces
 /// are loaded on demand; merely opening the picker does not load every font.
@@ -188,7 +264,16 @@ fn definitions() -> FontDefinitions {
             .insert((*name).into(), FontData::from_static(bytes).into());
         definitions.families.insert(
             FontFamily::Name((*name).into()),
-            vec![(*name).into(), "NotoEmoji-Regular".into()],
+            vec![
+                (*name).into(),
+                if name.ends_with("Bold") || name.ends_with("BoldItalic") {
+                    "Mono-Bold"
+                } else {
+                    "Mono"
+                }
+                .into(),
+                "NotoEmoji-Regular".into(),
+            ],
         );
     }
     let ui_style = TextStyle {
@@ -202,7 +287,12 @@ fn definitions() -> FontDefinitions {
         .or_insert_with(|| face(&ui_style));
     definitions.families.insert(
         FontFamily::Name(ui_key.clone().into()),
-        vec![ui_key.clone(), "Sans".into(), "NotoEmoji-Regular".into()],
+        vec![
+            ui_key.clone(),
+            "Sans".into(),
+            "Mono".into(),
+            "NotoEmoji-Regular".into(),
+        ],
     );
     definitions
         .families
@@ -261,7 +351,12 @@ pub fn prepare(ctx: &Context, doc: &Document, typing: &TextStyle) -> bool {
             definitions.font_data.insert(name.clone(), face(style));
             definitions.families.insert(
                 FontFamily::Name(name.clone().into()),
-                vec![name, "Sans".into(), "NotoEmoji-Regular".into()],
+                vec![
+                    name,
+                    "Sans".into(),
+                    if style.bold { "Mono-Bold" } else { "Mono" }.into(),
+                    "NotoEmoji-Regular".into(),
+                ],
             );
             changed = true;
         }
@@ -276,6 +371,45 @@ pub fn prepare(ctx: &Context, doc: &Document, typing: &TextStyle) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bundled_symbol_fallback_covers_boxes_and_arrows_for_screen_and_pdf() {
+        for bold in [false, true] {
+            let style = TextStyle {
+                font: "Noto Sans".into(),
+                bold,
+                ..Default::default()
+            };
+            for ch in (0x2500..=0x257f)
+                .filter_map(char::from_u32)
+                .chain("→←↑↓↔⇒⇐".chars())
+            {
+                let resolved = symbol_key(&style, ch);
+                assert!(resolved.starts_with("Mono"), "{ch} {resolved}");
+                let (_, bytes) = FONTS.iter().find(|(name, _)| *name == resolved).unwrap();
+                assert!(has_glyph(&FontData::from_static(bytes), ch), "{ch}");
+            }
+        }
+        let ctx = Context::default();
+        install(&ctx);
+        let mut out = ctx.run_ui(Default::default(), |_| {
+            ctx.fonts_mut(|fonts| {
+                let family = eframe::egui::FontId::new(11.0, FontFamily::Name("Sans".into()));
+                // epaint's has_glyph reports false when a real fallback glyph shares
+                // the replacement glyph's face. Compare actual raster atlas regions.
+                let g = fonts.layout_no_wrap(
+                    "┌─┐│├┤└┘→←↑↓↔\u{10ffff}".into(),
+                    family,
+                    eframe::egui::Color32::BLACK,
+                );
+                let glyphs = &g.rows[0].glyphs;
+                let tofu = glyphs.last().unwrap().uv_rect;
+                for glyph in &glyphs[..glyphs.len() - 1] {
+                    assert_ne!(glyph.uv_rect, tofu, "{}", glyph.chr);
+                }
+            });
+        });
+        out.textures_delta.clear();
+    }
     #[test]
     fn current_emoji_font_contains_newer_faces_without_missing_glyphs() {
         let face = harfrust::FontRef::new(include_bytes!("../assets/fonts/NotoEmoji.ttf")).unwrap();

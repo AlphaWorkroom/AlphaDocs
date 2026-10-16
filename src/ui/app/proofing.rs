@@ -35,9 +35,13 @@ impl AlphaDocs {
     pub(super) fn paste_native(&mut self) -> bool {
         match crate::clipboard::capture() {
             Ok(Some(capture)) => {
-                let width = self.session.editor.doc.page.size().0
-                    - self.session.editor.doc.page.margins[2]
-                    - self.session.editor.doc.page.margins[3];
+                let page = &self.session.editor.doc.page;
+                let columns = page.columns.max(1) as f32;
+                let width = (page.size().0
+                    - page.margins[2]
+                    - page.margins[3]
+                    - page.column_gap * (columns - 1.0))
+                    / columns;
                 let style = self.session.editor.typing.clone();
                 let (tx, receiver) = mpsc::channel();
                 std::thread::spawn(move || {
