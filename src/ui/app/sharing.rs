@@ -321,14 +321,17 @@ impl AlphaDocs {
             ui.label(if offer.viewer { "Invitation requests view-only access." } else { "Invitation requests live editing access." });
             ui.label("Names are chosen by the sender. Confirm this is the person/device you expect. Your open work is retained; joining opens a local copy and connects to the host.");
             ui.horizontal(|ui| {
-                if ui.button("Decline").clicked() { decision = Some(false); }
-                if primary(ui, "Join", self.palette, self.sharing.pending.is_none()).clicked() { decision = Some(true); }
+                let decline = ui.button("Decline");
+                let join = primary(ui, "Join", self.palette, self.sharing.pending.is_none());
+                #[cfg(test)] ctx.data_mut(|d| { d.insert_temp(Id::new("nearby_decline_bounds"), decline.rect); d.insert_temp(Id::new("nearby_join_bounds"), join.rect); });
+                if decline.clicked() { decision = Some(false); }
+                if join.clicked() { decision = Some(true); }
             });
         });
         if let Some(join) = decision {
             let selected = self.sharing.nearby.as_ref().and_then(|n| {
                 n.state.lock().ok().and_then(|mut s| {
-                    let index = s.offers.iter().position(|o| o.sender == offer.sender)?;
+                    let index = s.offers.iter().position(|o| o.same_request(&offer))?;
                     s.offers.remove(index)
                 })
             });
@@ -520,6 +523,61 @@ mod tests {
                 },
             ],
         );
+    }
+    #[test]
+    fn nearby_receiver_requires_a_real_join_click_and_decline_keeps_local_work() {
+        let hosted = live::host(
+            Document::new("Incoming draft"),
+            "127.0.0.1".parse().unwrap(),
+            "Sender QA".into(),
+        )
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap()
+        .unwrap();
+        let (ctx, mut receiver) = app(Theme::Light);
+        receiver.sharing.name = "Receiver QA".into();
+        receiver.session.editor.insert("Keep this local work");
+        let original = receiver.session.editor.doc.clone();
+        receiver.sharing.nearby = Some(crate::collaboration::nearby::Nearby::pending_for_test(
+            hosted.edit_invite.clone().unwrap(),
+        ));
+        frame(&ctx, &mut receiver, vec![]);
+        assert!(receiver.session.collaboration.is_none());
+        assert_eq!(receiver.session.editor.doc, original);
+        click(&ctx, &mut receiver, "nearby_decline_bounds");
+        assert!(
+            receiver
+                .sharing
+                .nearby
+                .as_ref()
+                .unwrap()
+                .state
+                .lock()
+                .unwrap()
+                .offers
+                .is_empty()
+        );
+        assert!(receiver.sharing.pending.is_none());
+        assert_eq!(receiver.session.editor.doc, original);
+        receiver.sharing.nearby = Some(crate::collaboration::nearby::Nearby::pending_for_test(
+            hosted.edit_invite.clone().unwrap(),
+        ));
+        click(&ctx, &mut receiver, "nearby_join_bounds");
+        assert!(receiver.sharing.pending.is_some());
+        for _ in 0..400 {
+            frame(&ctx, &mut receiver, vec![]);
+            if receiver.session.collaboration.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            receiver.session.collaboration.is_some(),
+            "{}",
+            receiver.sharing.error
+        );
+        assert_eq!(receiver.session.editor.doc.title, "Incoming draft");
+        assert_ne!(receiver.session.editor.doc.id, original.id);
     }
     #[test]
     fn native_ui_frames_start_join_edit_and_view_without_overwriting_local_document() {

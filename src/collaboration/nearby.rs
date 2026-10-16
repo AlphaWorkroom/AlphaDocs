@@ -41,6 +41,13 @@ pub struct Offer {
     pub invite: Invite,
     received: Instant,
 }
+impl Offer {
+    pub fn same_request(&self, other: &Self) -> bool {
+        self.sender == other.sender
+            && self.received == other.received
+            && self.received.elapsed() < Duration::from_secs(60)
+    }
+}
 #[derive(Default)]
 pub struct State {
     pub id: String,
@@ -163,6 +170,24 @@ async fn deliver(ep: &Endpoint, device: Device, wire: WireOffer) -> Result<(), S
     .map_err(|_| "Device did not respond".to_string())?
 }
 impl Nearby {
+    #[cfg(test)]
+    pub(crate) fn pending_for_test(invite: Invite) -> Self {
+        let (send, _) = mpsc::sync_channel(1);
+        let state = Arc::new(Mutex::new(State::default()));
+        state.lock().unwrap().offers.push_back(Offer {
+            sender: "test-device-123".into(),
+            name: "Sender QA".into(),
+            title: "Incoming draft".into(),
+            viewer: false,
+            invite,
+            received: Instant::now(),
+        });
+        Self {
+            state,
+            stop: Arc::new(AtomicBool::new(false)),
+            send,
+        }
+    }
     pub fn start(ip: IpAddr, name: String) -> Result<Self, String> {
         let IpAddr::V4(ip) = ip else {
             return Err(

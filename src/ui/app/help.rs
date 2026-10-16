@@ -18,7 +18,10 @@ impl AlphaDocs {
             self.open_feature_search();
         }
         ui.add_space(8.0);
-        if ui.button("Send feedback or report a bug ↗").clicked() {
+        if ui
+            .button("Send feedback or report a bug (opens browser)")
+            .clicked()
+        {
             ui.ctx().open_url(egui::OpenUrl::new_tab(FEEDBACK_FORM));
         }
         ui.label(
@@ -62,7 +65,7 @@ pub(super) const FEEDBACK_FORM: &str = "https://docs.google.com/forms/d/e/1FAIpQ
 
 fn keyboard_help(ui: &mut Ui) {
     egui::CollapsingHeader::new("Keyboard shortcuts").default_open(true).show_unindented(ui, |ui| {
-        ui.label("Click inside the document first. Hold the modifier keys, press the last key once, then release. On Mac, Cmd means the ⌘ key and Option means ⌥.");
+        ui.label("Click inside the document first. Hold the modifier keys, press the last key once, then release. On Mac, Cmd means the Command key; Option means the Alt/Option key.");
         for (group, rows) in [
             ("Documents", vec![
                 ("New document", "Ctrl+N", "Start a blank document in another file tab."),
