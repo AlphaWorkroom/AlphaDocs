@@ -17,7 +17,9 @@ for source, name in [("LICENSE", "LICENSE"), ("LICENSE", "READ ME - LICENSE.txt"
     shutil.copyfile(root / source, dist / name)
 for path in (root / "licenses").iterdir():
     if path.is_file(): shutil.copyfile(path, dist / path.name)
-metadata = subprocess.check_output(["cargo", "metadata", "--locked", "--format-version", "1"], cwd=root)
+# The separately shipped speech worker enables optional Rust dependencies that
+# the default editor does not link. Its notices must be packaged as well.
+metadata = subprocess.check_output(["cargo", "metadata", "--locked", "--all-features", "--format-version", "1"], cwd=root)
 path = root / "target/package-metadata.json"
 path.write_bytes(metadata)
 subprocess.run([sys.executable, str(root / "scripts/package_licences.py"), str(path)], check=True)
