@@ -3,7 +3,7 @@
 ## 0.1.4 — 17 October 2026
 
 - Fixed native scrollbar pointer ownership so dragging the thumb does not become a document selection. Mouse-wheel scrolling and outline navigation retain their measured scroll geometry.
-- Dictionary searches fall back to English Wiktionary when Free Dictionary API is unavailable. Results identify their source and licence; only the explicitly searched word is sent.
+- Dictionary searches fall back to English Wiktionary when Free Dictionary API is unavailable. Capitalized searches retry the lowercase English entry when needed. Results identify their source and licence; only the explicitly searched word is sent.
 - Text and highlight palettes now include a native hue/saturation wheel, brightness rail, HEX/RGB inputs and up to 24 pinned colours shared between both palettes. Applying a colour is undoable; pinning does not edit the document.
 - Table context menus select a complete row or column. Copy retains editable cells, formatting applies across the selection, and Delete/Backspace clears its contents in one undoable edit.
 - Added a checklist button immediately beside Add comment and a text context-menu action. Selected paragraphs and explicit body-text line breaks become independent checkable items; completed text is dimmed in light and dark themes without changing its stored colour.

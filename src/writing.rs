@@ -346,11 +346,24 @@ fn dictionary_with(
         return Ok(text);
     }
 
-    let fallback = format!("https://en.wiktionary.org/api/rest_v1/page/definition/{encoded}");
-    let bytes = fetch(&fallback).map_err(|_| {
-        "No definition is available right now. Try again later or check the spelling.".to_owned()
-    })?;
-    parse_wiktionary_definition(&bytes, word)
+    let mut lookup = |query: &str| {
+        let fallback = format!(
+            "https://en.wiktionary.org/api/rest_v1/page/definition/{}",
+            percent(query)
+        );
+        let bytes = fetch(&fallback).map_err(|_| {
+            "No definition is available right now. Try again later or check the spelling."
+                .to_owned()
+        })?;
+        parse_wiktionary_definition(&bytes, query)
+    };
+    let result = lookup(word);
+    let lower = word.to_lowercase();
+    if result.is_err() && lower != word {
+        lookup(&lower)
+    } else {
+        result
+    }
 }
 
 fn format_free_dictionary(value: &serde_json::Value, word: &str) -> Result<String, String> {
@@ -733,6 +746,39 @@ mod tests {
         assert!(
             dictionary_with("hippo?secret", |_| panic!("invalid input must not be sent")).is_err()
         );
+    }
+
+    #[test]
+    fn dictionary_retries_capitalized_words_but_preserves_real_case_sensitive_entries() {
+        let mut requested = Vec::new();
+        let result = dictionary_with("Hippo", |url| {
+            requested.push(url.to_owned());
+            if url.ends_with("/hippo") {
+                Ok(WIKTIONARY_HIPPO.to_vec())
+            } else if url.contains("wiktionary") {
+                // The capitalized page exists, but only contains Latin definitions.
+                Ok(br#"{"la":[{"definitions":[]}] }"#.to_vec())
+            } else {
+                Err("http status: 522".into())
+            }
+        })
+        .unwrap();
+        assert_eq!(requested.len(), 3);
+        assert!(result.contains("Clipping of hippopotamus."));
+        assert!(result.contains("https://en.wiktionary.org/wiki/hippo"));
+
+        requested.clear();
+        dictionary_with("London", |url| {
+            requested.push(url.to_owned());
+            if url.contains("wiktionary") {
+                Ok(WIKTIONARY_HIPPO.to_vec())
+            } else {
+                Err("offline".into())
+            }
+        })
+        .unwrap();
+        assert_eq!(requested.len(), 2);
+        assert!(requested[1].ends_with("/London"));
     }
 
     #[test]
