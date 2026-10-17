@@ -153,19 +153,45 @@ impl AlphaDocs {
             .spacing(vec2(4.0, 4.0))
             .show(ui, |ui| {
                 for (index, colour) in self.prefs.pinned_colours.clone().iter().enumerate() {
-                    let response = colour_swatch(ui, *colour, !self.session.viewing);
-                    if response.clicked() && !self.session.viewing {
-                        self.apply_colour(*colour, highlight);
-                        ui.close();
-                    }
-                    response.context_menu(|ui| {
-                        if ui.button("Unpin colour").clicked() {
-                            self.prefs.pinned_colours.retain(|value| value != colour);
-                            self.save_colour_preferences();
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 1.0;
+                        let response = colour_swatch(ui, *colour, !self.session.viewing);
+                        if response.clicked() && !self.session.viewing {
+                            self.apply_colour(*colour, highlight);
                             ui.close();
                         }
+                        response.context_menu(|ui| {
+                            if ui.button("Unpin colour").clicked() {
+                                self.prefs.pinned_colours.retain(|value| value != colour);
+                                self.save_colour_preferences();
+                                ui.close();
+                            }
+                        });
+                        let (rect, remove) =
+                            ui.allocate_exact_size(vec2(22.0, 26.0), Sense::click());
+                        remove.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                "Remove saved colour",
+                            )
+                        });
+                        if remove.hovered() {
+                            ui.painter().rect_filled(rect, 4.0, self.palette.hover);
+                        }
+                        icons::draw(ui, rect, Icon::Delete, self.palette.muted);
+                        #[cfg(test)]
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(Id::new(("remove_colour", *colour)), rect));
+                        if remove
+                            .on_hover_text("Remove saved colour from palette")
+                            .clicked()
+                        {
+                            self.prefs.pinned_colours.retain(|value| value != colour);
+                            self.save_colour_preferences();
+                        }
                     });
-                    if (index + 1) % 6 == 0 {
+                    if (index + 1) % 4 == 0 {
                         ui.end_row();
                     }
                 }
@@ -540,6 +566,52 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_colours_have_visible_removal_without_editing_document() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let (ctx, mut app) = editor();
+            app.prefs.theme = theme;
+            app.prefs.pinned_colours = vec![[11, 87, 208], [20, 30, 40]];
+            let original = app.session.editor.doc.clone();
+            let revision = app.session.editor.revision;
+            let mut draw = |events| {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.colours(ui, false),
+                );
+                output.textures_delta.clear();
+            };
+            draw(vec![]);
+            draw(vec![]);
+            let rect = ctx
+                .data(|d| d.get_temp::<Rect>(Id::new(("remove_colour", [11u8, 87, 208]))))
+                .unwrap();
+            let pos = rect.center();
+            draw(vec![
+                Event::PointerMoved(pos),
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+            assert_eq!(app.prefs.pinned_colours, [[20, 30, 40]]);
+            assert_eq!(app.session.editor.doc, original);
+            assert_eq!(app.session.editor.revision, revision);
+        }
+    }
 
     fn editor() -> (Context, AlphaDocs) {
         let ctx = Context::default();

@@ -91,20 +91,21 @@ impl AlphaDocs {
                 app.queue(Action::Reaction);
             }
             ui.separator();
+            let editable = app.image_block.is_some_and(|block| matches!(app.session.editor.doc.blocks.get(block), Some(Block::Image(i)) if i.editable.is_some()));
             if ui
                 .add(
-                    egui::Button::new("Image options")
+                    egui::Button::new(if editable { "Edit object…" } else { "Image options" })
                         .frame(false)
                         .min_size(vec2(106.0, 30.0)),
                 )
                 .clicked()
             {
-                app.image_options_open = true;
-                app.comments_open = false;
+                if editable { app.open_editable_object(None, app.image_block); }
+                else { app.image_options_open = true; app.comments_open = false; }
             }
             if ui
                 .add_enabled(
-                    !app.session.viewing,
+                    !app.session.viewing && !editable,
                     egui::Button::new("Original size")
                         .frame(false)
                         .min_size(vec2(100.0, 30.0)),

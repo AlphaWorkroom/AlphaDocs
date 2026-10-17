@@ -24,6 +24,7 @@ pub struct Replica {
     assets: MapRef,
     undo: UndoManager,
     media: HashMap<String, SharedVec<u8>>,
+    derived_media: HashMap<String, (std::sync::Arc<str>, SharedVec<u8>)>,
     projection: HashMap<(String, usize), (Value, Block)>,
 }
 impl Replica {
@@ -43,6 +44,7 @@ impl Replica {
             assets,
             undo,
             media: HashMap::new(),
+            derived_media: HashMap::new(),
             projection: HashMap::new(),
         }
     }
@@ -303,7 +305,19 @@ impl Replica {
             };
             for block in blocks.iter_mut() {
                 if let Block::Image(image) = block {
-                    if let Some(data) = self.media.get(&image.id) {
+                    if let Some(object) = &image.editable {
+                        if let Some((svg, data)) = self.derived_media.get(&image.id)
+                            && svg == &object.svg
+                        {
+                            image.data = data.clone();
+                        } else {
+                            let (data, _, _) = crate::editable_objects::raster_preview(object)?;
+                            self.derived_media
+                                .insert(image.id.clone(), (object.svg.clone(), data.clone()));
+                            image.data = data;
+                        }
+                        total += object.svg.len();
+                    } else if let Some(data) = self.media.get(&image.id) {
                         image.data = data.clone();
                     } else if let Some(Out::Any(Any::Buffer(bytes))) =
                         self.assets.get(&txn, &image.id)

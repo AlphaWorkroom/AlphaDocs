@@ -37,7 +37,7 @@ ui.set_width(if matches!(dialog,
 Dialog::Help | Dialog::About){
 540.0}
 else{
-if matches!(dialog, Dialog::Page) {348.0} else if matches!(dialog, Dialog::ColourPicker) {360.0} else {368.0}}
+if matches!(dialog, Dialog::Page) {348.0} else if matches!(dialog, Dialog::ColourPicker) {360.0} else if matches!(dialog, Dialog::EditableObject) {480.0} else {368.0}}
 );
 match dialog{
         Dialog::Tool(tool) => self.tool_dialog(tool,ui,&mut close),
@@ -217,6 +217,9 @@ close = true;
 if ui.button("Done").clicked() { close = true; }
 },
         Dialog::ColourPicker => self.colour_picker_dialog(ui, &mut close),
+        Dialog::TableFormat => self.table_format_dialog(ui, &mut close),
+        Dialog::TableFormula => self.table_formula_dialog(ui, &mut close),
+        Dialog::EditableObject => self.editable_object_dialog(ui, &mut close),
         Dialog::Symbols=>{
 ui.label(RichText::new("Special characters").size(24.0));
 ui.add_space(16.0);
@@ -369,6 +372,9 @@ Dialog::Find=>{
                     | Dialog::Rename
                     | Dialog::Message
                     | Dialog::ExportResult
+                    | Dialog::TableFormat
+                    | Dialog::TableFormula
+                    | Dialog::EditableObject
                     | Dialog::Tool(_)
             ) {
                 self.scroll_caret = true;

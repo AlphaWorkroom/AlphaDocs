@@ -31,6 +31,9 @@ The Windows installer requires .NET Framework 4.8. Downloads include the app, it
 
 ## Features
 
+New in 0.1.6: table shading/borders and calculations, editable equations, text boxes/basic shapes, visible custom-colour removal, and fixes for bordered DOCX story text and Windows update installation. See the [editor audit and compatibility limits](docs/EDITOR_COMPATIBILITY.md). Both devices must update for live editing.
+
+
 ### Multiple documents. One window.
 
 Keep multiple documents open using tabs, without needing separate windows. Each document keeps its own selection, undo history and save state. Organise sections with document-content tabs in the sidebar.

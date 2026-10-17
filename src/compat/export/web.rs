@@ -3,6 +3,20 @@ struct Web {
     assets: Vec<Entry>,
     image: usize,
 }
+fn box_css(style: BoxStyle) -> String {
+    let mut out = style
+        .fill
+        .map(|c| format!("background-color:{};", colour(c)))
+        .unwrap_or_default();
+    for (edge, side) in style.borders.iter().zip(["top", "bottom", "left", "right"]) {
+        out.push_str(&format!(
+            "border-{side}:{}pt solid {};",
+            edge.width,
+            colour(edge.colour)
+        ));
+    }
+    out
+}
 fn css_string(s: &str) -> String {
     s.chars()
         .map(|c| {
@@ -61,13 +75,13 @@ fn inline(p: &Paragraph) -> String {
     }
     out
 }
-fn paragraph(p: &Paragraph, id: &str) -> String {
+fn paragraph(p: &Paragraph, id: &str, in_cell: bool) -> String {
     let tag = match p.heading {
         1..=6 => format!("h{}", p.heading),
         7 => "h1".into(),
         _ => "p".into(),
     };
-    let style = format!(
+    let mut style = format!(
         "{}text-align:{};margin-top:{}pt;margin-bottom:{}pt;margin-left:{}pt;text-indent:{}pt;line-height:{};{}{}{}",
         text_style(&p.style),
         match p.alignment {
@@ -97,6 +111,9 @@ fn paragraph(p: &Paragraph, id: &str) -> String {
             ""
         }
     );
+    if !in_cell && let Some(decoration) = p.box_style {
+        style.push_str(&box_css(decoration));
+    }
     format!(
         "<{tag} id=\"{}\" style=\"{}\">{}{}</{tag}>\n",
         xml(id),
@@ -138,7 +155,7 @@ impl Web {
                     if kind.is_some() {
                         out.push_str("<li>");
                     }
-                    out.push_str(&paragraph(p, &format!("p{tab}-{index}")));
+                    out.push_str(&paragraph(p, &format!("p{tab}-{index}"), false));
                     if kind.is_some() {
                         out.push_str("</li>\n");
                     }
@@ -148,8 +165,11 @@ impl Web {
                     for (r, row) in rows.iter().enumerate() {
                         out.push_str("<tr>");
                         for (c, p) in row.iter().enumerate() {
-                            out.push_str("<td>");
-                            out.push_str(&paragraph(p, &format!("p{tab}-{index}-{r}-{c}")));
+                            out.push_str(&format!(
+                                "<td style=\"{}\">",
+                                box_css(p.box_style.unwrap_or_default())
+                            ));
+                            out.push_str(&paragraph(p, &format!("p{tab}-{index}-{r}-{c}"), true));
                             out.push_str("</td>");
                         }
                         out.push_str("</tr>\n");

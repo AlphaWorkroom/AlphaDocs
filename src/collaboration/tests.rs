@@ -15,6 +15,62 @@ fn fixture() -> Document {
     ];
     doc
 }
+#[test]
+fn editable_drawing_sources_refresh_remote_previews_and_share_unchanged_payloads() {
+    let context = eframe::egui::Context::default();
+    let source = |text: &str| ObjectSource::Drawing {
+        kind: ShapeKind::TextBox,
+        text: Box::new(Paragraph::from_text(text)),
+        fill: None,
+        border: CellBorder::default(),
+    };
+    let mut document = fixture();
+    let image = crate::editable_objects::prepare(&context, source("Before"), 200.0, 60.0).unwrap();
+    let id = image.id.clone();
+    document.blocks.push(Block::Image(image));
+    let mut sender = Replica::new(&document).unwrap();
+    let mut receiver = Replica::load(&sender.save()).unwrap();
+    let before = receiver.project(&document).unwrap();
+    let clock = receiver.vector();
+    let mut replacement =
+        crate::editable_objects::prepare(&context, source("After"), 200.0, 60.0).unwrap();
+    replacement.id = id;
+    document.blocks[2] = Block::Image(replacement);
+    sender.commit(&document).unwrap();
+    receiver.accept(&sender.diff(&clock).unwrap()).unwrap();
+    let after = receiver.project(&document).unwrap();
+    let Block::Image(before_image) = &before.blocks[2] else {
+        panic!()
+    };
+    let Block::Image(after_image) = &after.blocks[2] else {
+        panic!()
+    };
+    assert_ne!(before_image.data, after_image.data);
+    assert_eq!(
+        after_image.editable,
+        document
+            .blocks
+            .get(2)
+            .and_then(|b| if let Block::Image(i) = b {
+                i.editable.clone()
+            } else {
+                None
+            })
+    );
+    let clock = receiver.vector();
+    document.paragraph_mut(Address::default()).unwrap().chars[0].ch = 'J';
+    sender.commit(&document).unwrap();
+    receiver.accept(&sender.diff(&clock).unwrap()).unwrap();
+    let unchanged = receiver.project(&document).unwrap();
+    let Block::Image(unchanged_image) = &unchanged.blocks[2] else {
+        panic!()
+    };
+    assert_eq!(after_image.data.as_ptr(), unchanged_image.data.as_ptr());
+    assert!(Arc::ptr_eq(
+        &after_image.editable.as_ref().unwrap().svg,
+        &unchanged_image.editable.as_ref().unwrap().svg
+    ));
+}
 fn pair(
     doc: &Document,
 ) -> (

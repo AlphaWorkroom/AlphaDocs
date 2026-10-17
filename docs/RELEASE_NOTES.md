@@ -1,5 +1,18 @@
 # AlphaDocs 0.1.6
 
+This release fixes bordered DOCX story paragraphs being replaced by lines and Windows updates failing because the installer retained the installation as its working directory. The update regression exercises the real wait/swap/validate path in a disposable installation, including a retained previous payload.
+
+New editing controls:
+
+- Remove pinned custom colours with their visible trash buttons.
+- Set table cell/selected row/column backgrounds, border colours and widths.
+- Insert Word-style table formulas and explicitly recalculate the table with Undo.
+- Insert/edit equations, text boxes, rectangles, ellipses, lines and arrows; position/resize them on the page.
+
+Native files retain editable sources. DOCX uses standard Word formula fields, Office Math and editable WordprocessingShape objects; PDF uses vectors. Whole-package Open XML validation covers these constructs. Other rich exports use object pictures with a notice. This remains a deliberate document subset: merged cells, true inline objects, arbitrary/custom shapes, tracked changes and standard Word comment interoperability remain unsupported. [Editor audit and compatibility limits](https://github.com/AlphaWorkroom/AlphaDocs/blob/main/docs/EDITOR_COMPATIBILITY.md).
+
+Both devices need this update for live-editing sessions with editable objects. The user’s unavailable MacBook story has not been tested directly; the fixed importer is covered by original Unicode story/table fixtures. Native/runtime and external-reader evidence are recorded separately from cross-platform build/package checks.
+
 Closing Preferences after changing themes, Help, About, word count and other informational dialogs now retains your reading position and selection. Full editor frames verify the shared dialog-closing path in both themes.
 
 The fixes from 0.1.5 are included:

@@ -114,6 +114,9 @@ internal sealed class Setup : Form {
         }
     }
     string Install(bool desktopShortcut, bool association) {
+        // Older installed clients inherit the installation as their working
+        // directory. Release our own directory handle before swapping it.
+        ReleaseInstallDirectory(destination);
         destinationValidated = false;
         var stage = destination + ".install-" + Guid.NewGuid().ToString("N");
         Extract(stage);
@@ -164,14 +167,37 @@ internal sealed class Setup : Form {
         var temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         if (String.IsNullOrEmpty(parent) || !String.Equals(Path.GetFullPath(parent), temp, StringComparison.OrdinalIgnoreCase) || !Directory.Exists(parent))
             throw new IOException("Update verification target must be a new direct child of the current user's temporary folder.");
+        // Detaching must also work for a fresh installation whose Programs
+        // parent has not been created yet.
+        ReleaseInstallDirectory(Path.Combine(destination, "missing-parent", "AlphaDocs"));
         Extract(destination); // seed the isolated destination with the packaged old payload
         var setup = new Setup(destination, true);
         Directory.CreateDirectory(setup.verificationDataDirectory);
-        var backup = setup.Install(false, false);
+        // Reproduce launching from an installed Start-menu shortcut, including
+        // a nested CWD. Previously this made Directory.Move fail even after the
+        // editor had exited. Use the production Install path for verification.
+        Directory.CreateDirectory(Path.Combine(destination, "cwd-regression"));
+        Environment.CurrentDirectory = Path.Combine(destination, "cwd-regression");
+        var oldStart = new ProcessStartInfo(Path.Combine(destination, "AlphaDocs.exe"), "--self-check") { UseShellExecute = false, CreateNoWindow = true };
+        oldStart.EnvironmentVariables["ALPHADOCS_DATA_DIR"] = setup.verificationDataDirectory;
+        using (var oldProcess = Process.Start(oldStart)) {
+            if (oldProcess == null) throw new IOException("Could not start isolated previous installation.");
+            setup.Update(oldProcess.Id, destination + ".update.log");
+            if (!oldProcess.WaitForExit(120000) || oldProcess.ExitCode != 0) throw new IOException("Previous native payload self-check failed.");
+        }
+        var backup = setup.previousInstall;
         if (String.IsNullOrEmpty(backup) || !File.Exists(Path.Combine(backup, "AlphaDocs.exe")))
             throw new IOException("Update verification did not retain the previous payload.");
         ValidatePayload(Path.Combine(backup, "AlphaDocs.exe"), setup.verificationDataDirectory);
         ValidatePayload(Path.Combine(destination, "AlphaDocs.exe"), setup.verificationDataDirectory);
+    }
+    static void ReleaseInstallDirectory(string installation) {
+        var safe = Path.GetFullPath(Path.GetTempPath());
+        var target = Path.GetFullPath(installation).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (String.Equals(safe.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), target, StringComparison.OrdinalIgnoreCase)
+            || safe.StartsWith(target + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            safe = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        Environment.CurrentDirectory = safe;
     }
     void ValidateForInstall(string exe) { ValidatePayload(exe, verificationDataDirectory); }
     static void ValidatePayload(string exe, string dataDirectory = null) {
@@ -199,7 +225,7 @@ internal sealed class Setup : Form {
         AppendLog(log, "Validating and installing the verified update.");
         Install(false, false);
         AppendLog(log, "Installed update passed its native self-check.");
-        Process.Start(new ProcessStartInfo(Path.Combine(destination, "AlphaDocs.exe")) { UseShellExecute = true });
+        if (!verificationMode) Process.Start(new ProcessStartInfo(Path.Combine(destination, "AlphaDocs.exe")) { UseShellExecute = true });
     }
     static void AppendLog(string path, string message) {
         File.AppendAllText(path, DateTime.UtcNow.ToString("o") + " " + message + Environment.NewLine);

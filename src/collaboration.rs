@@ -81,7 +81,7 @@ struct Envelope {
     request: Request,
 }
 async fn endpoint(ip: IpAddr) -> Result<Endpoint, String> {
-    endpoint_for(ip, vec![ALPN.to_vec(), b"alphadocs/live/2".to_vec()]).await
+    endpoint_for(ip, vec![ALPN.to_vec(), live::ALPN.to_vec()]).await
 }
 async fn endpoint_for(ip: IpAddr, alpns: Vec<Vec<u8>>) -> Result<Endpoint, String> {
     Builder::empty()

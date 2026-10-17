@@ -92,6 +92,29 @@ pub fn write(doc: &Document, format: Format, path: &Path) -> Result<Report, Stri
 }
 fn report(doc: &Document, format: Format) -> Report {
     let mut notices = vec![];
+    let blocks = || {
+        doc.tabs
+            .iter()
+            .enumerate()
+            .flat_map(|(i, _)| doc.tab_blocks(i))
+    };
+    if format != Format::Native
+        && blocks().any(|b| matches!(b,Block::Image(i) if i.editable.is_some()))
+    {
+        notices.push("Equations, text boxes and shapes are exported as embedded pictures in this format. Keep .adocs or use DOCX to retain their editable source.".into());
+    }
+    if format != Format::Native
+        && blocks().any(
+            |b| matches!(b,Block::Table(rows) if rows.iter().flatten().any(|p|p.formula.is_some())),
+        )
+    {
+        notices.push("Table calculation results are retained; live formula fields are available in .adocs and DOCX only.".into());
+    }
+    if matches!(format, Format::Rtf | Format::Odt)
+        && blocks().any(|b| matches!(b,Block::Paragraph(p) if p.box_style.is_some()))
+    {
+        notices.push("Paragraph borders and paragraph shading are not retained in this format; table-cell colours and borders are retained.".into());
+    }
     match format {
         Format::Txt=>notices.push("Plain text contains text and tab-separated table cells; text formatting and images are not included.".into()),
         Format::Markdown=>notices.push("Markdown preserves supported text structure and pictures in its companion folder; font sizes, colours and physical page layout are not represented.".into()),

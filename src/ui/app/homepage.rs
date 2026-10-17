@@ -438,6 +438,31 @@ fn preview(ui: &Ui, doc: &Document, rect: Rect, p: Palette) {
     let measured = Layout::measure(ui.ctx(), &preview);
     let scale = rect.width() / measured.size.x;
     let painter = ui.painter().with_clip_rect(rect.shrink(3.0));
+    let decorate = |bounds: Rect, style: BoxStyle| {
+        let bounds = Rect::from_min_size(
+            rect.min + bounds.min.to_vec2() * scale,
+            bounds.size() * scale,
+        );
+        if let Some(fill) = style.fill {
+            painter.rect_filled(bounds, 0.0, layout::color(fill));
+        }
+        for (a, b, border) in layout::box_edges(bounds, style) {
+            if border.width > 0.0 {
+                painter.line_segment(
+                    [a, b],
+                    Stroke::new(
+                        (border.width * scale).max(0.3),
+                        layout::color(border.colour),
+                    ),
+                );
+            }
+        }
+    };
+    for (page, bounds, style) in layout::paragraph_boxes(&measured, doc) {
+        if page == 0 {
+            decorate(bounds, style);
+        }
+    }
     for front in [false, true] {
         for object in &measured.objects {
             match object {
@@ -495,13 +520,15 @@ fn preview(ui: &Ui, doc: &Document, rect: Rect, p: Palette) {
                     }
                 }
                 Object::Border {
-                    page: 0, rect: r, ..
+                    page: 0,
+                    rect: r,
+                    address,
                 } if !front => {
-                    painter.rect_stroke(
-                        Rect::from_min_size(rect.min + r.min.to_vec2() * scale, r.size() * scale),
-                        0.0,
-                        Stroke::new(0.4, p.border),
-                        egui::StrokeKind::Inside,
+                    decorate(
+                        *r,
+                        doc.paragraph(*address)
+                            .and_then(|p| p.box_style)
+                            .unwrap_or_default(),
                     );
                 }
                 _ => {}

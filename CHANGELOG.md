@@ -1,6 +1,18 @@
 # Changelog
 
-## 0.1.6 — 17 October 2026
+## 0.1.6 — 18 October 2026
+
+- Fixed a destructive DOCX import branch that replaced paragraphs containing borders with horizontal rules, discarding their story text. Nonempty paragraphs and empty/nil border overrides now retain text/styles and actual borders/shading.
+- Corrected exported OOXML formatting-property ordering, cell-border ordering and mandatory table grids. Full-package Microsoft Open XML SDK validation covers story text, table colours/formulas, editable equations and five basic drawing types.
+- DOCX imports preserve text in content-control/custom-XML wrappers, multiple drawings/equations and legacy text boxes. Nested cell text and foot/endnote contents are retained in an explicitly reported flattened form. Unsupported constructs still report limits; this is not full Word layout parity.
+- Fixed Windows updates launched from installed shortcuts: both the client and installer leave the installation working directory before renaming it. A disposable production-path test launches the old executable, waits for exit, swaps the installation and validates the new and retained payloads.
+- Pinned custom colours now have visible remove buttons. Removing a swatch changes the personal palette, not document styling or undo history.
+- Added cell/row/column background fill and border colour/width. Fill-only changes retain individual cell edges; styles survive native/DOCX round trips and render in screen/PDF and supported rich exports.
+- Added bounded offline table formulas with references/ranges, positional arguments and common arithmetic/aggregate functions. Formula edits and explicit whole-table recalculation are undoable; DOCX uses standard Word fields with cached results. Unrecognised imported Word number masks/results are preserved until the user chooses a supported format.
+- Added editable LaTeX equations, text boxes, rectangles, ellipses, lines and arrows. Source dialogs provide text/font/colour/fill/border/dimensions; existing drag/resize controls retain editable sources and one-step Undo. DOCX uses standard OMML/WPS; PDF uses vectors. Other rich exports retain pictures and report source loss.
+- Editable object changes refresh their preview on live-editing peers without replacing original media assets. This version updates the live-session protocol; both devices must update.
+- Added an explicit [editor capability and compatibility audit](docs/EDITOR_COMPATIBILITY.md), including merged-cell, inline-object, advanced-shape, tracked-change and Word-comment limitations.
+
 
 - Closing Preferences after switching themes, Help, About, word count and other informational dialogs retains the reading viewport and document selection instead of jumping to an offscreen caret. Content-changing dialogs retain their existing caret navigation.
 - Full editor frames verify this behaviour in both themes, including personal dictionary, notification, accessibility, comparison and translation dialogs.

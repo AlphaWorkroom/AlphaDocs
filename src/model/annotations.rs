@@ -3,6 +3,7 @@ impl Paragraph {
     /// Scalar offsets are supplied by the grapheme-aware engine. Transform
     /// anchors at the actual edit location, never by guessing a text diff.
     pub(crate) fn replace_text(&mut self, range: std::ops::Range<usize>, chars: Vec<StyledChar>) {
+        self.formula = None;
         let inserted = chars.len();
         let removed = range.end - range.start;
         for note in &mut self.annotations {
@@ -32,6 +33,7 @@ impl Paragraph {
         self.snap_annotations();
     }
     pub(crate) fn split_text(&mut self, offset: usize) -> Self {
+        self.formula = None;
         let mut right = self.clone();
         right.chars = self.chars.split_off(offset).into();
         right.annotations.clear();
@@ -55,6 +57,7 @@ impl Paragraph {
         right
     }
     pub(crate) fn append_text(&mut self, mut other: Self) {
+        self.formula = None;
         let offset = self.chars.len();
         self.chars.extend(std::mem::take(&mut other.chars));
         for mut note in other.annotations {

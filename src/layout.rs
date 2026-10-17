@@ -10,6 +10,71 @@ pub fn checklist_mark_size(line_height: f32) -> f32 {
     (line_height * 0.7).min(15.0)
 }
 
+pub fn box_edges(rect: Rect, style: BoxStyle) -> [(Pos2, Pos2, CellBorder); 4] {
+    [
+        (rect.left_top(), rect.right_top(), style.borders[0]),
+        (rect.left_bottom(), rect.right_bottom(), style.borders[1]),
+        (rect.left_top(), rect.left_bottom(), style.borders[2]),
+        (rect.right_top(), rect.right_bottom(), style.borders[3]),
+    ]
+}
+
+/// The same measured paragraph fragments are decorated on screen and in PDF.
+/// A paragraph can span pages or columns; never draw across a page/column gap.
+pub fn paragraph_boxes(layout: &Layout, doc: &Document) -> Vec<(usize, Rect, BoxStyle)> {
+    let mut fragments: Vec<(usize, usize, Rect, BoxStyle)> = vec![];
+    let columns = if doc.page.pageless {
+        1
+    } else {
+        doc.page.columns.max(1)
+    };
+    let column_width = (doc.page.size().0
+        - doc.page.margins[2]
+        - doc.page.margins[3]
+        - doc.page.column_gap * (columns - 1) as f32)
+        / columns as f32;
+    for line in &layout.lines {
+        if !matches!(
+            doc.blocks.get(line.address.block),
+            Some(Block::Paragraph(_))
+        ) {
+            continue;
+        }
+        let Some(paragraph) = doc.paragraph(line.address) else {
+            continue;
+        };
+        let Some(style) = paragraph.box_style else {
+            continue;
+        };
+        let column = ((line.rect.left() - doc.page.margins[2])
+            / (column_width + doc.page.column_gap))
+            .floor()
+            .clamp(0.0, (columns - 1) as f32);
+        let left =
+            doc.page.margins[2] + column * (column_width + doc.page.column_gap) + paragraph.indent;
+        let fragment = Rect::from_min_max(
+            pos2(left, line.rect.top()),
+            pos2(
+                left + (column_width - paragraph.indent).max(24.0),
+                line.rect.bottom(),
+            ),
+        );
+        if let Some((page, block, rect, _)) = fragments.last_mut()
+            && *page == line.page
+            && *block == line.address.block
+            && (rect.left() - fragment.left()).abs() < column_width * 0.5
+        {
+            *rect = rect.union(fragment);
+        } else {
+            fragments.push((line.page, line.address.block, fragment, style));
+        }
+    }
+    fragments
+        .into_iter()
+        .map(|(page, _, rect, style)| (page, rect.expand(2.0), style))
+        .collect()
+}
+
 #[derive(Clone)]
 pub struct Line {
     pub address: Address,
@@ -216,6 +281,10 @@ pub fn display_line(
     background: [u8; 3],
 ) -> Arc<Galley> {
     let p = doc.paragraph(line.address).expect("Measured paragraph");
+    let background = p
+        .box_style
+        .and_then(|style| style.fill)
+        .unwrap_or(background);
     let mut job = egui::text::LayoutJob {
         keep_trailing_whitespace: true,
         ..Default::default()
@@ -646,6 +715,12 @@ impl Layout {
                             block.checked_sub(1).and_then(|i| doc.blocks.get(i))
                     {
                         spaced.before = (p.before - previous.after).max(0.0);
+                    }
+                    if p.box_style.is_some_and(|s| {
+                        s.fill.is_some() || s.borders.iter().any(|b| b.width > 0.0)
+                    }) {
+                        spaced.before += 2.0;
+                        spaced.after += 2.0;
                     }
                     let p = &spaced;
                     if !doc.page.pageless
@@ -1154,6 +1229,32 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn paragraph_decorations_follow_measured_columns_and_pages_without_bridging_gaps() {
+        let mut doc = Document::new("Bordered chapter");
+        doc.page.columns = 2;
+        let mut paragraph =
+            Paragraph::from_text(&"Measured chapter text with café and arrows →. ".repeat(160));
+        paragraph.box_style = Some(BoxStyle {
+            fill: Some([240, 244, 249]),
+            ..Default::default()
+        });
+        doc.blocks = vec![Block::Paragraph(paragraph)];
+        let before = doc.clone();
+        let measured = measured(&doc);
+        let fragments = paragraph_boxes(&measured, &doc);
+        assert!(fragments.len() >= 3);
+        let column_width =
+            (doc.page.size().0 - doc.page.margins[2] - doc.page.margins[3] - doc.page.column_gap)
+                / 2.0;
+        for (page, rect, _) in fragments {
+            assert!(page < measured.pages);
+            assert!((rect.width() - column_width - 4.0).abs() < 0.01);
+            assert!(rect.top() >= doc.page.margins[0] - 2.1);
+            assert!(rect.bottom() <= doc.page.size().1 - doc.page.margins[1] + 2.1);
+        }
+        assert_eq!(doc, before);
+    }
     #[test]
     fn adjacent_paragraph_spacing_uses_maximum_without_mutating_metadata() {
         let mut doc = Document::new("Spacing");

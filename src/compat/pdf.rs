@@ -7,6 +7,8 @@ use crate::{
 use printpdf::*;
 use std::{collections::HashMap, path::Path};
 use unicode_segmentation::UnicodeSegmentation;
+#[path = "pdf_vectors.rs"]
+mod vectors;
 
 fn rgb(c: [u8; 3]) -> Color {
     Color::Rgb(Rgb::new(
@@ -64,6 +66,34 @@ fn fill(ops: &mut Vec<Op>, rect: eframe::egui::Rect, h: f32, c: [u8; 3]) {
             winding_order: WindingOrder::NonZero,
         },
     });
+}
+fn styled_box(ops: &mut Vec<Op>, rect: eframe::egui::Rect, h: f32, style: BoxStyle) {
+    if let Some(colour) = style.fill {
+        fill(ops, rect, h, colour);
+    }
+    for (a, b, border) in crate::layout::box_edges(rect, style) {
+        if border.width == 0.0 {
+            continue;
+        }
+        ops.push(Op::SetOutlineColor {
+            col: rgb(border.colour),
+        });
+        ops.push(Op::SetOutlineThickness {
+            pt: Pt(border.width),
+        });
+        ops.push(Op::DrawLine {
+            line: Line {
+                points: vec![a, b]
+                    .into_iter()
+                    .map(|p| LinePoint {
+                        p: point(p.x, h - p.y),
+                        bezier: false,
+                    })
+                    .collect(),
+                is_closed: false,
+            },
+        });
+    }
 }
 
 /// Checklists use document-coloured vectors, independent of font glyph coverage
@@ -180,6 +210,11 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                 doc.page.color,
             );
         }
+        for (pn, rect, style) in crate::layout::paragraph_boxes(layout, doc) {
+            if pn == page {
+                styled_box(&mut ops, rect, h, style);
+            }
+        }
         for obj in &layout.objects {
             match obj {
                 Object::Image {
@@ -189,6 +224,19 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                     ..
                 } if *p == page => {
                     if let Block::Image(i) = &doc.blocks[*block] {
+                        if let Some(object) = &i.editable
+                            && i.visible_crop() == [0.0, 0.0, 1.0, 1.0]
+                            && !i.padding.enabled
+                            && i.effects == ImageEffects::default()
+                        {
+                            let vector_ops = vectors::render(object, *rect, h)?;
+                            if i.placement.flow == ImageFlow::Front {
+                                front_images.extend(vector_ops);
+                            } else {
+                                ops.extend(vector_ops);
+                            }
+                            continue;
+                        }
                         let bytes = if i.visible_crop() != [0.0, 0.0, 1.0, 1.0]
                             || i.padding.enabled
                             || i.effects != ImageEffects::default()
@@ -220,9 +268,18 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                         }
                     }
                 }
-                Object::Border { page: p, rect, .. } if *p == page => {
-                    stroke(&mut ops, *rect, h, [128; 3], true)
-                }
+                Object::Border {
+                    page: p,
+                    rect,
+                    address,
+                } if *p == page => styled_box(
+                    &mut ops,
+                    *rect,
+                    h,
+                    doc.paragraph(*address)
+                        .and_then(|p| p.box_style)
+                        .unwrap_or_default(),
+                ),
                 Object::Rule { page: p, rect } if *p == page => {
                     stroke(&mut ops, *rect, h, [100; 3], false)
                 }

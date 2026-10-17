@@ -300,10 +300,44 @@ impl Editor {
         if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
             return;
         }
+        if !self.collaboration_writable() {
+            return;
+        }
+        let regenerated = if let Some(Block::Image(image)) = self.doc.blocks.get(block)
+            && let Some(object) = &image.editable
+        {
+            let mut source = object.source.clone();
+            if let ObjectSource::Equation { size, .. } = &mut source {
+                let factor = if (width - image.width).abs() > 0.01 {
+                    width / image.width
+                } else {
+                    height / image.height
+                };
+                *size = (*size * factor).clamp(6.0, 100.0);
+            }
+            let Ok(generated) = crate::editable_objects::prepare(
+                &eframe::egui::Context::default(),
+                source,
+                width,
+                height,
+            ) else {
+                return;
+            };
+            Some(generated)
+        } else {
+            None
+        };
         self.transaction(|e| {
             if let Some(Block::Image(image)) = e.doc.blocks.get_mut(block) {
-                image.width = width;
-                image.height = height;
+                if let Some(generated) = regenerated {
+                    image.data = generated.data;
+                    image.editable = generated.editable;
+                    image.width = generated.width;
+                    image.height = generated.height;
+                } else {
+                    image.width = width;
+                    image.height = height;
+                }
             }
         });
     }

@@ -1,5 +1,7 @@
 use crate::model::*;
 mod annotations;
+mod calculations;
+pub use calculations::edit_drawing_text;
 mod operations;
 mod shared;
 mod typing;
@@ -1023,6 +1025,9 @@ impl Editor {
         self.sync_style();
     }
     pub fn insert_block(&mut self, b: Block) {
+        if self.caret.address.block == usize::MAX {
+            return;
+        }
         self.transaction(|e| {
             e.delete_inner();
             e.split_inner();
@@ -1140,6 +1145,13 @@ fn snapshot_weight(snapshot: &Snapshot) -> usize {
             Block::Table(rows) => rows.iter().flatten().map(paragraph).sum(),
             Block::Image(i) => {
                 i.data.len()
+                    + i.editable.as_ref().map_or(0, |object| {
+                        object.svg.len()
+                            + match &object.source {
+                                ObjectSource::Equation { latex, .. } => latex.len(),
+                                ObjectSource::Drawing { text, .. } => paragraph(text),
+                            }
+                    })
                     + i.comments
                         .iter()
                         .map(|c| c.text.len() + c.replies.iter().map(String::len).sum::<usize>())

@@ -1,4 +1,6 @@
 //! A deliberate OOXML subset. Unsupported content produces import warnings.
+#[path = "docx_objects.rs"]
+mod objects;
 use crate::model::*;
 use quick_xml::{Reader, events::Event};
 use std::{
@@ -11,6 +13,8 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 #[derive(Clone, Default, Debug)]
 struct Node {
+    qualified_name: String,
+    qualified_attrs: Vec<(String, String)>,
     name: String,
     attrs: HashMap<String, String>,
     text: String,
@@ -31,6 +35,21 @@ impl Node {
             Some(self)
         } else {
             self.children.iter().find_map(|c| c.descendant(name))
+        }
+    }
+    fn descendants<'a>(&'a self, name: &str, out: &mut Vec<&'a Node>) {
+        if self.name == name {
+            out.push(self);
+            return;
+        }
+        if self.name == "AlternateContent" {
+            if let Some(branch) = self.child("Choice").or_else(|| self.child("Fallback")) {
+                branch.descendants(name, out);
+            }
+        } else {
+            for child in &self.children {
+                child.descendants(name, out);
+            }
         }
     }
 }
@@ -119,9 +138,17 @@ fn parse(xml: &str) -> Result<Node, String> {
                     == Some(&b'/');
                 let mut n = Node {
                     name: local(e.name().as_ref()),
+                    qualified_name: String::from_utf8_lossy(e.name().as_ref()).into_owned(),
                     ..Default::default()
                 };
-                for a in e.attributes().flatten() {
+                for a in e.attributes() {
+                    let a = a.map_err(|e| e.to_string())?;
+                    n.qualified_attrs.push((
+                        String::from_utf8_lossy(a.key.as_ref()).into_owned(),
+                        a.decode_and_unescape_value(reader.decoder())
+                            .map_err(|e| e.to_string())?
+                            .into_owned(),
+                    ));
                     n.attrs.insert(
                         local(a.key.as_ref()),
                         a.decode_and_unescape_value(reader.decoder())
@@ -132,6 +159,9 @@ fn parse(xml: &str) -> Result<Node, String> {
                 if empty {
                     stack.last_mut().ok_or("Malformed XML")?.children.push(n);
                 } else {
+                    if stack.len() >= 256 {
+                        return Err("DOCX XML nesting is too deep".into());
+                    }
                     stack.push(n);
                 }
             }
@@ -158,7 +188,19 @@ fn parse(xml: &str) -> Result<Node, String> {
                     .text
                     .push_str(&quick_xml::escape::unescape(&t).map_err(|e| e.to_string())?);
             }
-            Event::Eof => break,
+            Event::CData(e) => {
+                stack
+                    .last_mut()
+                    .ok_or("Malformed XML")?
+                    .text
+                    .push_str(&e.decode().map_err(|e| e.to_string())?);
+            }
+            Event::Eof => {
+                if stack.len() != 1 {
+                    return Err("Incomplete DOCX XML".into());
+                }
+                break;
+            }
             _ => {}
         }
     }
@@ -184,13 +226,32 @@ fn twips(v: f32) -> i32 {
     (v * 20.0).round() as i32
 }
 fn rpr(s: &TextStyle) -> String {
+    // CT_RPr is an ordered sequence, not an unordered property bag.
     let mut x = format!(
-        "<w:rPr><w:rFonts w:ascii=\"{}\" w:hAnsi=\"{}\"/><w:sz w:val=\"{}\"/><w:color w:val=\"{}\"/>",
+        "<w:rPr><w:rFonts w:ascii=\"{}\" w:hAnsi=\"{}\"/>",
         esc(&s.font),
-        esc(&s.font),
-        (s.size * 2.0).round() as i32,
-        rgb(s.color)
+        esc(&s.font)
     );
+    if s.bold {
+        x.push_str("<w:b/>");
+    }
+    if s.italic {
+        x.push_str("<w:i/>");
+    }
+    if s.strike {
+        x.push_str("<w:strike/>");
+    }
+    x.push_str(&format!(
+        "<w:color w:val=\"{}\"/><w:sz w:val=\"{}\"/>",
+        rgb(s.color),
+        (s.size * 2.0).round() as i32
+    ));
+    if s.underline {
+        x.push_str("<w:u w:val=\"single\"/>");
+    }
+    if let Some(c) = s.highlight {
+        x.push_str(&format!("<w:shd w:fill=\"{}\"/>", rgb(c)));
+    }
     if s.baseline != Baseline::Normal {
         x.push_str(&format!(
             "<w:vertAlign w:val=\"{}\"/>",
@@ -201,24 +262,10 @@ fn rpr(s: &TextStyle) -> String {
             }
         ));
     }
-    if s.bold {
-        x.push_str("<w:b/>");
-    }
-    if s.italic {
-        x.push_str("<w:i/>");
-    }
-    if s.underline {
-        x.push_str("<w:u w:val=\"single\"/>");
-    }
-    if s.strike {
-        x.push_str("<w:strike/>");
-    }
-    if let Some(c) = s.highlight {
-        x.push_str(&format!("<w:shd w:fill=\"{}\"/>", rgb(c)));
-    }
     x.push_str("</w:rPr>");
     x
 }
+
 struct Writer {
     rels: Vec<(String, String, String)>,
     images: Vec<(String, SharedVec<u8>)>,
@@ -232,6 +279,37 @@ impl Writer {
         id
     }
     fn paragraph(&mut self, p: &Paragraph) -> String {
+        self.paragraph_inner(p, false)
+    }
+    fn table(&mut self, rows: &[Vec<Paragraph>], width: f32) -> String {
+        let mut out = String::from("<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/></w:tblPr>");
+        let columns = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        let cell_width = twips(width / columns as f32);
+        out.push_str("<w:tblGrid>");
+        for _ in 0..columns {
+            out.push_str(&format!("<w:gridCol w:w=\"{cell_width}\"/>"));
+        }
+        out.push_str("</w:tblGrid>");
+        for row in rows {
+            out.push_str("<w:tr>");
+            for cell in row {
+                out.push_str(&format!(
+                    "<w:tc><w:tcPr><w:tcW w:w=\"{cell_width}\" w:type=\"dxa\"/>"
+                ));
+                out.push_str(&write_box_style(
+                    cell.box_style.unwrap_or_default(),
+                    "tcBorders",
+                ));
+                out.push_str("</w:tcPr>");
+                out.push_str(&self.paragraph_inner(cell, true));
+                out.push_str("</w:tc>");
+            }
+            out.push_str("</w:tr>");
+        }
+        out.push_str("</w:tbl>");
+        out
+    }
+    fn paragraph_inner(&mut self, p: &Paragraph, in_cell: bool) -> String {
         let mut x = format!(
             "<w:p alphadocs:annotations=\"{}\" alphadocs:annotationText=\"{}\"><w:pPr>",
             esc(&serde_json::to_string(&p.annotations).expect("Annotations serialize")),
@@ -247,27 +325,31 @@ impl Writer {
             8 => "Subtitle".into(),
             _ => "Normal".into(),
         };
-        x.push_str(&format!("<w:pStyle w:val=\"{sty}\"/><w:jc w:val=\"{}\"/><w:ind w:left=\"{}\" w:firstLine=\"{}\"/><w:spacing w:before=\"{}\" w:after=\"{}\" w:line=\"{}\" w:lineRule=\"auto\"/>",match p.alignment{Alignment::Left=>"left",Alignment::Center=>"center",Alignment::Right=>"right",Alignment::Justified=>"both"},twips(p.indent),twips(p.first_indent),twips(p.before),twips(p.after),(p.line_spacing*240.0).round()as i32));
-        if p.page_break_before {
-            x.push_str("<w:pageBreakBefore/>");
+        x.push_str(&format!("<w:pStyle w:val=\"{sty}\"/>"));
+        if p.keep_next {
+            x.push_str("<w:keepNext/>");
         }
         if p.keep_together {
             x.push_str("<w:keepLines/>");
+        }
+        if p.page_break_before {
+            x.push_str("<w:pageBreakBefore/>");
         }
         x.push_str(if p.widow_control {
             "<w:widowControl/>"
         } else {
             "<w:widowControl w:val=\"0\"/>"
         });
-        if p.keep_next {
-            x.push_str("<w:keepNext/>");
-        }
         if matches!(p.list, ListKind::Bullet | ListKind::Number) {
             x.push_str(&format!(
                 "<w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"{}\"/></w:numPr>",
                 if p.list == ListKind::Number { 2 } else { 1 }
             ));
         }
+        if !in_cell && let Some(style) = p.box_style {
+            x.push_str(&write_box_style(style, "pBdr"));
+        }
+        x.push_str(&format!("<w:spacing w:before=\"{}\" w:after=\"{}\" w:line=\"{}\" w:lineRule=\"auto\"/><w:ind w:left=\"{}\" w:firstLine=\"{}\"/><w:jc w:val=\"{}\"/>", twips(p.before), twips(p.after), (p.line_spacing*240.0).round() as i32, twips(p.indent), twips(p.first_indent), match p.alignment { Alignment::Left=>"left", Alignment::Center=>"center", Alignment::Right=>"right", Alignment::Justified=>"both" }));
         x.push_str(&rpr(&p.style));
         x.push_str("</w:pPr>");
         if p.list == ListKind::Check {
@@ -278,6 +360,23 @@ impl Writer {
                 "<w:sdt xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" mc:Ignorable=\"w14\"><w:sdtPr><w:id w:val=\"{}\"/><w14:checkbox><w14:checked w14:val=\"{}\"/><w14:checkedState w14:val=\"2611\" w14:font=\"Segoe UI Symbol\"/><w14:uncheckedState w14:val=\"2610\" w14:font=\"Segoe UI Symbol\"/></w14:checkbox></w:sdtPr><w:sdtContent><w:r><w:rPr><w:rFonts w:ascii=\"Segoe UI Symbol\" w:hAnsi=\"Segoe UI Symbol\"/></w:rPr><w:t>{}</w:t></w:r></w:sdtContent></w:sdt><w:r><w:t xml:space=\"preserve\"> </w:t></w:r>",
                 self.counter, u8::from(p.checked), if p.checked { '☑' } else { '☐' }
             ));
+        }
+        if in_cell && let Some(formula) = &p.formula {
+            let number = formula.word_number_format.clone().or_else(|| {
+                formula.decimals.map(|d| {
+                    if d == 0 {
+                        "0".into()
+                    } else {
+                        format!("0.{}", "0".repeat(d as usize))
+                    }
+                })
+            });
+            let instruction = format!(
+                "{}{}",
+                formula.expression,
+                number.map(|s| format!(" \\# \"{s}\" ")).unwrap_or_default()
+            );
+            x.push_str(&format!("<w:fldSimple w:instr=\"{}\">", esc(&instruction)));
         }
         let mut start = 0;
         while start < p.chars.len() {
@@ -306,10 +405,16 @@ impl Writer {
             }
             start = end;
         }
+        if in_cell && p.formula.is_some() {
+            x.push_str("</w:fldSimple>");
+        }
         x.push_str("</w:p>");
         x
     }
     fn image(&mut self, i: &EmbeddedImage) -> Result<String, String> {
+        if i.editable.is_some() {
+            return objects::write(self, i);
+        }
         let ext = if i.data.starts_with(&[0x89, b'P', b'N', b'G']) {
             "png"
         } else {
@@ -407,6 +512,30 @@ impl Writer {
             .replace("</wp:inline>", "</wp:anchor>"))
     }
 }
+pub fn export_notices(doc: &Document) -> Vec<String> {
+    let mut notices = Vec::new();
+    for block in doc
+        .tabs
+        .iter()
+        .enumerate()
+        .flat_map(|(index, _)| doc.tab_blocks(index))
+    {
+        if let Block::Image(image) = block
+            && image
+                .editable
+                .as_ref()
+                .is_some_and(|o| matches!(o.source, ObjectSource::Equation { .. }))
+            && (image.placement.flow != ImageFlow::Break
+                || image.placement.offset.iter().any(|v| *v < 0.0)
+                || image.effects != ImageEffects::default()
+                || image.crop.is_some())
+        {
+            notices.push("Equations are exported as editable left-aligned Office Math blocks. Advanced wrapping, negative offsets and picture effects on equations are not represented in DOCX.".into());
+            break;
+        }
+    }
+    notices
+}
 pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
     doc.validate()?;
     let mut writer = Writer {
@@ -419,7 +548,7 @@ pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
         let tab = &doc.tabs[index];
         body.push_str(&format!("<w:sdt alphadocs:tabId=\"{}\" alphadocs:tabTitle=\"{}\"><w:sdtPr><w:alias w:val=\"{}\"/><w:tag w:val=\"alphadocs-tab:{}\"/></w:sdtPr><w:sdtContent>", esc(&tab.id), esc(&tab.title), esc(&tab.title), esc(&tab.id)));
         for b in doc.tab_blocks(index) {
-            match b{Block::Paragraph(p)=>body.push_str(&writer.paragraph(p)),Block::Table(rows)=>{body.push_str("<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders>");for side in ["top","left","bottom","right","insideH","insideV"]{body.push_str(&format!("<w:{side} w:val=\"single\" w:sz=\"4\" w:color=\"808080\"/>"));}body.push_str("</w:tblBorders></w:tblPr>");for row in rows{body.push_str("<w:tr>");for cell in row{body.push_str("<w:tc>");body.push_str(&writer.paragraph(cell));body.push_str("</w:tc>");}body.push_str("</w:tr>");}body.push_str("</w:tbl>");},Block::Image(i)=>body.push_str(&writer.image(i)?),Block::PageBreak=>body.push_str("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>"),Block::Rule=>body.push_str("<w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\"/></w:pBdr></w:pPr></w:p>")}
+            match b{Block::Paragraph(p)=>body.push_str(&writer.paragraph(p)),Block::Table(rows)=>body.push_str(&writer.table(rows, (doc.page.size().0 - doc.page.margins[2] - doc.page.margins[3] - doc.page.column_gap * (doc.page.columns - 1) as f32) / doc.page.columns as f32)),Block::Image(i)=>body.push_str(&writer.image(i)?),Block::PageBreak=>body.push_str("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>"),Block::Rule=>body.push_str("<w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\"/></w:pBdr></w:pPr></w:p>")}
         }
         body.push_str("</w:sdtContent></w:sdt>");
     }
@@ -444,8 +573,8 @@ pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
     if doc.page.page_numbers || !doc.page.footer.chars.is_empty() {
         let id = writer.relation("footer", "footer1.xml");
         body = body.replace(
-            "<w:sectPr>",
-            &format!("<w:sectPr><w:footerReference w:type=\"default\" r:id=\"{id}\"/>"),
+            "<w:pgSz",
+            &format!("<w:footerReference w:type=\"default\" r:id=\"{id}\"/><w:pgSz"),
         );
     }
     let header = format!(
@@ -467,9 +596,9 @@ pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
     );
     let xml = if doc.page.line_numbers != LineNumbering::Off {
         xml.replace(
-            "</w:sectPr>",
+            "<w:cols",
             &format!(
-                "<w:lnNumType w:countBy=\"1\" w:distance=\"120\" w:restart=\"{}\"/></w:sectPr>",
+                "<w:lnNumType w:countBy=\"1\" w:distance=\"120\" w:restart=\"{}\"/><w:cols",
                 if doc.page.line_numbers == LineNumbering::EachPage {
                     "newPage"
                 } else {
@@ -482,6 +611,10 @@ pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
     };
     writer.relation("styles", "styles.xml");
     writer.relation("numbering", "numbering.xml");
+    // Without a compatibility setting Word treats a newly generated package
+    // as an old-format document and offers to downgrade modern editable shapes.
+    writer.relation("settings", "settings.xml");
+    let settings = "<w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>";
     let rels=format!("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{}</Relationships>",writer.rels.iter().map(|(id,typ,target)|format!("<Relationship Id=\"{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{typ}\" Target=\"{}\"{}/>",esc(target),if typ=="hyperlink"{" TargetMode=\"External\""}else{""})).collect::<String>());
     let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -490,6 +623,7 @@ pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
     let types = "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"jpeg\" ContentType=\"image/jpeg\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/numbering.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>";
     let root_rels = "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>";
     let types = types.replace("</Types>", "<Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/></Types>");
+    let types = types.replace("</Types>", "<Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\"/></Types>");
     let page_field = "<w:ftr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:sz w:val=\"18\"/></w:rPr><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r></w:p></w:ftr>";
     if doc.page.page_numbers
         && let Some(field) = page_field
@@ -515,6 +649,7 @@ pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
         ("word/_rels/document.xml.rels", &rels),
         ("word/styles.xml", &styles),
         ("word/numbering.xml", numbering),
+        ("word/settings.xml", settings),
         ("docProps/core.xml", &core),
         ("word/footer1.xml", footer.as_str()),
         ("word/header1.xml", header.as_str()),
@@ -547,6 +682,137 @@ fn read_xml(zip: &mut ZipArchive<File>, name: &str) -> Result<Node, String> {
 fn on(n: &Node, key: &str) -> bool {
     n.child(key)
         .is_some_and(|c| !matches!(c.val(), Some("0" | "false" | "off" | "none")))
+}
+fn read_box_style(pr: &Node, borders: &str, mut style: BoxStyle) -> BoxStyle {
+    if let Some(shading) = pr.child("shd") {
+        style.fill = shading.attr("fill").and_then(unrgb);
+    }
+    if let Some(edges) = pr.child(borders) {
+        for (index, side) in ["top", "bottom", "left", "right"].iter().enumerate() {
+            if let Some(edge) = edges.child(side) {
+                style.borders[index] = CellBorder {
+                    colour: edge.attr("color").and_then(unrgb).unwrap_or([128; 3]),
+                    width: if matches!(edge.val(), None | Some("nil" | "none")) {
+                        0.0
+                    } else {
+                        edge.attr("sz")
+                            .and_then(|s| s.parse::<f32>().ok())
+                            .filter(|v| v.is_finite())
+                            .unwrap_or(4.0)
+                            .clamp(0.0, 96.0)
+                            / 8.0
+                    },
+                };
+            }
+        }
+    }
+    style
+}
+fn table_formula(cell: &Node) -> Option<TableFormula> {
+    fn instructions(node: &Node, out: &mut String) {
+        if node.name == "instrText" {
+            out.push_str(&node.text);
+        }
+        if node.name == "fldSimple"
+            && let Some(value) = node.attr("instr")
+        {
+            out.push_str(value);
+        }
+        for child in &node.children {
+            instructions(child, out);
+        }
+    }
+    let mut code = String::new();
+    instructions(cell, &mut code);
+    let code = code.trim();
+    if !code.starts_with('=') {
+        return None;
+    }
+    let expression = code.split('\\').next()?.trim().to_owned();
+    let mask = code
+        .split("\\#")
+        .nth(1)
+        .and_then(|mask| mask.trim().strip_prefix('"'))
+        .and_then(|mask| mask.split('"').next());
+    let decimals = mask.and_then(|mask| {
+        if mask == "0" {
+            Some(0)
+        } else {
+            mask.strip_prefix("0.")
+                .filter(|s| s.bytes().all(|c| c == b'0'))
+                .map(|s| s.len() as u8)
+        }
+    });
+    let formula = TableFormula {
+        expression,
+        decimals,
+        word_number_format: mask.filter(|_| decimals.is_none()).map(str::to_owned),
+    };
+    formula.valid().then_some(formula)
+}
+fn write_box_style(style: BoxStyle, tag: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("<w:{tag}>"));
+    for (index, side) in [(0, "top"), (2, "left"), (1, "bottom"), (3, "right")] {
+        let border = style.borders[index];
+        out.push_str(&format!(
+            "<w:{side} w:val=\"{}\" w:sz=\"{}\" w:color=\"{}\"{}/>",
+            if border.width == 0.0 { "nil" } else { "single" },
+            (border.width * 8.0).round() as u32,
+            rgb(border.colour),
+            if tag == "pBdr" { " w:space=\"2\"" } else { "" }
+        ));
+    }
+    out.push_str(&format!("</w:{tag}>"));
+    if let Some(fill) = style.fill {
+        out.push_str(&format!(
+            "<w:shd w:val=\"clear\" w:fill=\"{}\"/>",
+            rgb(fill)
+        ));
+    }
+    out
+}
+fn table_cell_style(
+    pr: &Node,
+    mut style: BoxStyle,
+    row: usize,
+    column: usize,
+    rows: usize,
+    columns: usize,
+) -> BoxStyle {
+    if let Some(shd) = pr.child("shd") {
+        style.fill = shd.attr("fill").and_then(unrgb);
+    }
+    if let Some(borders) = pr.child("tblBorders") {
+        for (index, name) in [
+            (0, if row > 0 { "insideH" } else { "top" }),
+            (1, if row + 1 < rows { "insideH" } else { "bottom" }),
+            (2, if column > 0 { "insideV" } else { "left" }),
+            (
+                3,
+                if column + 1 < columns {
+                    "insideV"
+                } else {
+                    "right"
+                },
+            ),
+        ] {
+            if let Some(edge) = borders.child(name) {
+                let mut border = edge.clone();
+                border.name = ["top", "bottom", "left", "right"][index].into();
+                let wrapper = Node {
+                    children: vec![Node {
+                        name: "tcBorders".into(),
+                        children: vec![border],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                };
+                style = read_box_style(&wrapper, "tcBorders", style);
+            }
+        }
+    }
+    style
 }
 fn apply_style(s: &mut TextStyle, n: &Node) {
     if n.child("b").is_some() {
@@ -637,6 +903,13 @@ impl Styles {
         }
     }
     fn properties(&self, p: &mut Paragraph, pr: &Node, numbering: &HashMap<String, ListKind>) {
+        if pr.child("pBdr").is_some() || pr.child("shd").is_some() {
+            p.box_style = Some(read_box_style(
+                pr,
+                "pBdr",
+                p.box_style.unwrap_or_else(BoxStyle::unbordered),
+            ));
+        }
         if let Some(r) = pr.child("rPr") {
             self.run(&mut p.style, r);
         }
@@ -758,6 +1031,14 @@ fn collect_runs(
                     collect_runs(content, p, rels, styles, link.clone(), check_separator);
                 }
             }
+            "ins" | "moveTo" | "smartTag" | "customXml" | "fldSimple" => {
+                collect_runs(child, p, rels, styles, link.clone(), check_separator)
+            }
+            "AlternateContent" => {
+                if let Some(branch) = child.child("Choice").or_else(|| child.child("Fallback")) {
+                    collect_runs(branch, p, rels, styles, link.clone(), check_separator);
+                }
+            }
             "r" => {
                 let mut s = p.style.clone();
                 if let Some(r) = child.child("rPr") {
@@ -776,6 +1057,10 @@ fn collect_runs(
                 for t in &child.children {
                     let mut text = match t.name.as_str() {
                         "t" => t.text.clone(),
+                        "footnoteReference" => {
+                            format!("[Footnote {}]", t.attr("id").unwrap_or("?"))
+                        }
+                        "endnoteReference" => format!("[Endnote {}]", t.attr("id").unwrap_or("?")),
                         "tab" => "\t".into(),
                         "br" | "cr" if t.attr("type") != Some("page") => "\n".into(),
                         _ => String::new(),
@@ -855,6 +1140,44 @@ fn paragraph(
     }
     p
 }
+fn tab_marker(node: &Node) -> bool {
+    node.attr("tabId").is_some()
+        || node
+            .child("sdtPr")
+            .and_then(|n| n.child("tag"))
+            .and_then(Node::val)
+            .is_some_and(|v| {
+                v.starts_with("alphadocs-tab:") || v.starts_with(crate::legacy::TAB_TAG)
+            })
+}
+fn body_nodes<'a>(node: &'a Node, out: &mut Vec<&'a Node>) {
+    match node.name.as_str() {
+        "body" | "customXml" | "ins" | "moveTo" => {
+            for child in &node.children {
+                body_nodes(child, out);
+            }
+        }
+        "sdt" => {
+            if tab_marker(node) {
+                out.push(node);
+            }
+            if let Some(content) = node.child("sdtContent") {
+                for child in &content.children {
+                    body_nodes(child, out);
+                }
+            }
+        }
+        "AlternateContent" => {
+            if let Some(choice) = node.child("Choice").or_else(|| node.child("Fallback")) {
+                for child in &choice.children {
+                    body_nodes(child, out);
+                }
+            }
+        }
+        "del" | "moveFrom" => {}
+        _ => out.push(node),
+    }
+}
 pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
     let mut zip =
         ZipArchive::new(File::open(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
@@ -914,6 +1237,16 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
         }
     }
     fn fixed_spacing(n: &Node) -> bool {
+        // A generated horizontal line uses an empty anchor paragraph solely
+        // to reserve its object box. Its native image height retains that space.
+        if n.name == "p"
+            && n.descendant("t").is_none()
+            && n.descendant("docPr")
+                .is_some_and(|p| p.attr("lineBoxHeight").is_some())
+            && n.descendant("prstGeom").and_then(|p| p.attr("prst")) == Some("line")
+        {
+            return false;
+        }
         (n.name == "spacing"
             && n.attr("lineRule")
                 .is_some_and(|v| v == "exact" || v == "atLeast"))
@@ -968,24 +1301,40 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
                 .into_owned()
         });
     let mut doc = Document::new(&title);
+    let object_context = eframe::egui::Context::default();
     doc.blocks.clear();
     let mut tab_started = false;
     let mut nodes = Vec::new();
-    for child in &body.children {
-        if child.name == "sdt" && child.child("sdtContent").is_some() {
-            if child.attr("tabId").is_some()
-                || child
-                    .descendant("tag")
-                    .and_then(Node::val)
-                    .is_some_and(|v| {
-                        v.starts_with("alphadocs-tab:") || v.starts_with(crate::legacy::TAB_TAG)
-                    })
-            {
-                nodes.push(child);
-            }
-            nodes.extend(&child.child("sdtContent").unwrap().children);
-        } else {
-            nodes.push(child);
+    body_nodes(body, &mut nodes);
+    for (name, message) in [
+        (
+            "ins",
+            "Tracked insertions are shown as current text; revision history is not imported.",
+        ),
+        (
+            "del",
+            "Tracked deletions are omitted from current text; revision history is not imported.",
+        ),
+        (
+            "gridSpan",
+            "Merged table cells are imported as separate cells; merged geometry is not retained.",
+        ),
+        ("vMerge", "Vertical table merges are not retained."),
+        (
+            "footnoteReference",
+            "Footnote references are retained as markers; footnote layout is not supported.",
+        ),
+        (
+            "endnoteReference",
+            "Endnote references are retained as markers; endnote layout is not supported.",
+        ),
+        (
+            "commentRangeStart",
+            "Standard Word comment threads are not imported; document text is retained.",
+        ),
+    ] {
+        if root.descendant(name).is_some() {
+            warnings.push(message.into());
         }
     }
     for n in nodes {
@@ -1025,11 +1374,30 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
             "p" => {
                 let p = paragraph(n, &rels, &styles, &numbering);
                 let has_text = !p.chars.is_empty();
-                if has_text || n.descendant("drawing").is_none() && n.descendant("br").is_none() {
-                    if n.descendant("pBdr").is_some() {
+                if has_text
+                    || n.descendant("drawing").is_none()
+                        && n.descendant("br").is_none()
+                        && n.descendant("oMath").is_none()
+                {
+                    // A paragraph border is formatting, never a replacement for
+                    // its content. Word also writes empty/nil border overrides.
+                    if !has_text
+                        && n.child("pPr")
+                            .and_then(|pr| pr.child("pBdr"))
+                            .and_then(|borders| borders.child("bottom"))
+                            .is_some_and(|border| {
+                                border.val() == Some("single")
+                                    && border.attr("sz") == Some("6")
+                                    && border.attr("color").is_none_or(|c| c == "808080")
+                                    && n.child("pPr")
+                                        .and_then(|p| p.child("pBdr"))
+                                        .is_some_and(|b| b.children.len() == 1)
+                                    && p.box_style.is_none_or(|style| style.fill.is_none())
+                            })
+                    {
                         doc.blocks.push(Block::Rule);
                     } else {
-                        doc.blocks.push(Block::Paragraph(p));
+                        doc.blocks.push(Block::Paragraph(p.clone()));
                     }
                 }
                 if let Some(br) = n.descendant("br")
@@ -1037,276 +1405,395 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
                 {
                     doc.blocks.push(Block::PageBreak);
                 }
-                if let Some(drawing) = n.descendant("drawing")
-                    && let Some(id) = drawing.descendant("blip").and_then(|n| n.attr("embed"))
-                    && let Some(target) = rels.get(id)
-                {
-                    let target = if target.starts_with('/') {
-                        target.trim_start_matches('/').to_string()
-                    } else {
-                        format!("word/{target}")
-                    };
-                    if let Ok(mut data) = read_part(&mut zip, &target) {
-                        let ex = drawing.descendant("extent");
-                        let width = ex
-                            .and_then(|n| n.attr("cx"))
-                            .and_then(|v| v.parse::<f32>().ok())
-                            .unwrap_or(2540000.0)
-                            / 12700.0;
-                        let height = ex
-                            .and_then(|n| n.attr("cy"))
-                            .and_then(|v| v.parse::<f32>().ok())
-                            .unwrap_or(2540000.0)
-                            / 12700.0;
-                        let properties = drawing.descendant("docPr");
-                        if let Some(anchor) = drawing.descendant("anchor")
-                            && (anchor.child("positionH").is_some_and(|n| {
-                                n.attr("relativeFrom") != Some("column")
-                                    || n.child("align").is_some()
-                            }) || anchor.child("positionV").is_some_and(|n| {
-                                n.attr("relativeFrom") != Some("paragraph")
-                                    || n.child("align").is_some()
-                            }))
-                        {
-                            warnings.push("Floating image positions relative to page/margins or using alignment are approximated as column/text-anchor offsets.".into());
+                let mut equations = Vec::new();
+                n.descendants("oMath", &mut equations);
+                for equation in equations {
+                    match objects::read_math(equation, &p, &object_context) {
+                        Ok(mut image) => {
+                            objects::restore_metadata(&mut image, Some(n));
+                            if doc
+                                .blocks
+                                .iter()
+                                .any(|b| matches!(b, Block::Image(i) if i.id == image.id))
+                            {
+                                image.id = new_object_id();
+                            }
+                            doc.blocks.push(Block::Image(image));
                         }
-                        let mut trim_transparency =
-                            properties.and_then(|n| n.attr("trim")) == Some("true");
-                        let trim_bounds = properties
-                            .and_then(|n| n.attr("trimBounds"))
-                            .and_then(|s| serde_json::from_str::<Option<[f32; 4]>>(s).ok())
-                            .flatten();
-                        let standard_crop = drawing.descendant("srcRect").map(|n| {
-                            let offset = |name| {
-                                n.attr(name)
-                                    .and_then(|s| s.parse::<f32>().ok())
-                                    .unwrap_or(0.0)
-                                    / 100000.0
-                            };
-                            [
-                                offset("l"),
-                                offset("t"),
-                                1.0 - offset("r"),
-                                1.0 - offset("b"),
-                            ]
-                        });
-                        let mut crop = properties
-                            .and_then(|n| n.attr("crop"))
-                            .and_then(|s| serde_json::from_str::<Option<[f32; 4]>>(s).ok())
-                            .unwrap_or(standard_crop);
-                        let mut visible = if trim_transparency {
-                            trim_bounds.or(crop)
-                        } else {
-                            crop
+                        Err(error) => {
+                            warnings.push(format!("Could not import equation: {error}; readable mathematical text was retained."));
+                            let mut tokens = Vec::new();
+                            equation.descendants("t", &mut tokens);
+                            doc.blocks.push(Block::Paragraph(Paragraph::from_text(
+                                &tokens.iter().map(|n| n.text.as_str()).collect::<String>(),
+                            )));
                         }
-                        .unwrap_or([0.0, 0.0, 1.0, 1.0]);
-                        let mut padding: ImagePadding = properties
-                            .and_then(|n| n.attr("padding"))
-                            .and_then(|s| serde_json::from_str(s).ok())
-                            .unwrap_or_default();
-                        if !padding.fraction.is_finite()
-                            || !(0.0..=0.25).contains(&padding.fraction)
-                        {
-                            padding = ImagePadding::default();
-                        }
-                        let saved_w = properties
-                            .and_then(|n| n.attr("sourceWidth"))
-                            .and_then(|s| s.parse::<f32>().ok())
-                            .unwrap_or(width);
-                        let saved_h = properties
-                            .and_then(|n| n.attr("sourceHeight"))
-                            .and_then(|s| s.parse::<f32>().ok())
-                            .unwrap_or(height);
-                        let mut restored_source = false;
-                        if let Some(original) = properties
-                            .and_then(|n| n.attr("originalMedia"))
-                            .and_then(|id| rels.get(id))
-                        {
-                            let original = if original.starts_with('/') {
-                                original.trim_start_matches('/').to_owned()
-                            } else {
-                                format!("word/{original}")
-                            };
-                            if let Ok(source) = read_part(&mut zip, &original) {
-                                let view = EmbeddedImage {
-                                    data: source.clone().into(),
-                                    width: saved_w,
-                                    height: saved_h,
-                                    crop: Some(visible),
-                                    padding,
-                                    ..Default::default()
-                                };
-                                if crate::image_edit::flattened_png(&view)
-                                    .is_ok_and(|bytes| bytes == data)
-                                    && standard_crop.is_none_or(|v| v == [0.0, 0.0, 1.0, 1.0])
-                                {
-                                    data = source;
-                                    restored_source = true;
+                    }
+                    if has_text {
+                        warnings.push(
+                            "Inline equations are imported as separate editable objects.".into(),
+                        );
+                    }
+                }
+                let mut drawings = Vec::new();
+                n.descendants("drawing", &mut drawings);
+                for drawing in drawings {
+                    if drawing.descendant("wsp").is_some() {
+                        match objects::read_drawing(
+                            drawing,
+                            &rels,
+                            &styles,
+                            &numbering,
+                            &object_context,
+                        ) {
+                            Ok(image) => doc.blocks.push(Block::Image(image)),
+                            Err(error) => {
+                                warnings.push(format!("Could not import drawing: {error}"));
+                                if let Some(content) = drawing.descendant("txbxContent") {
+                                    for child in content.children.iter().filter(|n| n.name == "p") {
+                                        doc.blocks.push(Block::Paragraph(paragraph(
+                                            child, &rels, &styles, &numbering,
+                                        )));
+                                    }
                                 }
                             }
-                            if !restored_source {
-                                padding.enabled = false;
-                                trim_transparency = false;
-                                visible = standard_crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
-                                crop = Some(visible);
-                                warnings.push("An external editor changed padded image media/crop; its standard image takes precedence over AlphaDocs's reversible source.".into());
-                            }
                         }
-                        let expected = if restored_source {
-                            [0.0, 0.0, 1.0, 1.0]
+                    } else if let Some(id) =
+                        drawing.descendant("blip").and_then(|n| n.attr("embed"))
+                        && let Some(target) = rels.get(id)
+                    {
+                        let target = if target.starts_with('/') {
+                            target.trim_start_matches('/').to_string()
                         } else {
-                            visible
+                            format!("word/{target}")
                         };
-                        if let Some(standard) = standard_crop
-                            && standard
-                                .iter()
-                                .zip(expected)
-                                .any(|(a, b)| (a - b).abs() > 0.00001)
-                        {
-                            // A different editor changed the visible crop. Its standard
-                            // DrawingML geometry takes precedence over stale extensions.
-                            visible = [
-                                standard[0].clamp(0.0, 1.0),
-                                standard[1].clamp(0.0, 1.0),
-                                standard[2].clamp(0.0, 1.0),
-                                standard[3].clamp(0.0, 1.0),
-                            ];
-                            crop = Some(visible);
-                            trim_transparency = false;
-                            padding.enabled = false;
-                            if standard.iter().any(|v| !(0.0..=1.0).contains(v)) {
-                                warnings.push("Externally edited negative image crop is approximated; AlphaDocs padding was cleared.".into());
+                        if let Ok(mut data) = read_part(&mut zip, &target) {
+                            let ex = drawing.descendant("extent");
+                            let width = ex
+                                .and_then(|n| n.attr("cx"))
+                                .and_then(|v| v.parse::<f32>().ok())
+                                .unwrap_or(2540000.0)
+                                / 12700.0;
+                            let height = ex
+                                .and_then(|n| n.attr("cy"))
+                                .and_then(|v| v.parse::<f32>().ok())
+                                .unwrap_or(2540000.0)
+                                / 12700.0;
+                            let properties = drawing.descendant("docPr");
+                            if let Some(anchor) = drawing.descendant("anchor")
+                                && (anchor.child("positionH").is_some_and(|n| {
+                                    n.attr("relativeFrom") != Some("column")
+                                        || n.child("align").is_some()
+                                }) || anchor.child("positionV").is_some_and(|n| {
+                                    n.attr("relativeFrom") != Some("paragraph")
+                                        || n.child("align").is_some()
+                                }))
+                            {
+                                warnings.push("Floating image positions relative to page/margins or using alignment are approximated as column/text-anchor offsets.".into());
                             }
-                        }
-                        let mut source_width = properties
-                            .and_then(|n| n.attr("sourceWidth"))
-                            .and_then(|s| s.parse::<f32>().ok())
-                            .unwrap_or(width / (visible[2] - visible[0]));
-                        let mut source_height = properties
-                            .and_then(|n| n.attr("sourceHeight"))
-                            .and_then(|s| s.parse::<f32>().ok())
-                            .unwrap_or(height / (visible[3] - visible[1]));
-                        let geometry = EmbeddedImage {
-                            width: source_width,
-                            height: source_height,
-                            crop: Some(visible),
-                            padding,
-                            ..Default::default()
-                        };
-                        let (saved_visible_w, saved_visible_h) = geometry.visible_size();
-                        if (saved_visible_w - width).abs() > 0.02
-                            || (saved_visible_h - height).abs() > 0.02
-                        {
-                            (source_width, source_height) =
-                                geometry.source_size_for_visible(width, height);
-                        }
-                        doc.blocks.push(Block::Image(EmbeddedImage {
-                            id: properties
-                                .and_then(|n| n.attr("objectId"))
-                                .filter(|id| {
-                                    !doc.blocks
-                                        .iter()
-                                        .any(|b| matches!(b,Block::Image(i) if &i.id==id))
-                                })
-                                .map(str::to_owned)
-                                .unwrap_or_else(new_object_id),
-                            placement: import_placement(drawing, properties),
-                            comments: properties
-                                .and_then(|n| n.attr("comments"))
-                                .and_then(|s| serde_json::from_str(s).ok())
-                                .unwrap_or_default(),
-                            reactions: properties
-                                .and_then(|n| n.attr("reactions"))
-                                .and_then(|s| serde_json::from_str(s).ok())
-                                .unwrap_or_default(),
-                            name: properties
-                                .and_then(|n| n.attr("name"))
-                                .unwrap_or(&target)
-                                .into(),
-                            data: data.into(),
-                            width: source_width,
-                            height: source_height,
-                            crop,
-                            trim_transparency,
-                            trim_bounds,
-                            padding,
-                            effects: {
-                                let lum = drawing.descendant("lum");
-                                let fraction = |node: Option<&Node>, name: &str, default| {
-                                    node.and_then(|n| n.attr(name))
+                            let mut trim_transparency =
+                                properties.and_then(|n| n.attr("trim")) == Some("true");
+                            let trim_bounds = properties
+                                .and_then(|n| n.attr("trimBounds"))
+                                .and_then(|s| serde_json::from_str::<Option<[f32; 4]>>(s).ok())
+                                .flatten();
+                            let standard_crop = drawing.descendant("srcRect").map(|n| {
+                                let offset = |name| {
+                                    n.attr(name)
                                         .and_then(|s| s.parse::<f32>().ok())
-                                        .map(|v| v / 100000.0)
-                                        .unwrap_or(default)
+                                        .unwrap_or(0.0)
+                                        / 100000.0
                                 };
-                                let standard = ImageEffects {
-                                    opacity: fraction(
-                                        drawing.descendant("alphaModFix"),
-                                        "amt",
-                                        1.0,
-                                    ),
-                                    brightness: fraction(lum, "bright", 0.0),
-                                    contrast: fraction(lum, "contrast", 0.0),
-                                    grayscale: drawing.descendant("grayscl").is_some(),
+                                [
+                                    offset("l"),
+                                    offset("t"),
+                                    1.0 - offset("r"),
+                                    1.0 - offset("b"),
+                                ]
+                            });
+                            let mut crop = properties
+                                .and_then(|n| n.attr("crop"))
+                                .and_then(|s| serde_json::from_str::<Option<[f32; 4]>>(s).ok())
+                                .unwrap_or(standard_crop);
+                            let mut visible = if trim_transparency {
+                                trim_bounds.or(crop)
+                            } else {
+                                crop
+                            }
+                            .unwrap_or([0.0, 0.0, 1.0, 1.0]);
+                            let mut padding: ImagePadding = properties
+                                .and_then(|n| n.attr("padding"))
+                                .and_then(|s| serde_json::from_str(s).ok())
+                                .unwrap_or_default();
+                            if !padding.fraction.is_finite()
+                                || !(0.0..=0.25).contains(&padding.fraction)
+                            {
+                                padding = ImagePadding::default();
+                            }
+                            let saved_w = properties
+                                .and_then(|n| n.attr("sourceWidth"))
+                                .and_then(|s| s.parse::<f32>().ok())
+                                .unwrap_or(width);
+                            let saved_h = properties
+                                .and_then(|n| n.attr("sourceHeight"))
+                                .and_then(|s| s.parse::<f32>().ok())
+                                .unwrap_or(height);
+                            let mut restored_source = false;
+                            if let Some(original) = properties
+                                .and_then(|n| n.attr("originalMedia"))
+                                .and_then(|id| rels.get(id))
+                            {
+                                let original = if original.starts_with('/') {
+                                    original.trim_start_matches('/').to_owned()
+                                } else {
+                                    format!("word/{original}")
                                 };
-                                let stored: Option<ImageEffects> = properties
-                                    .and_then(|n| n.attr("effects"))
-                                    .and_then(|s| serde_json::from_str(s).ok());
-                                stored
-                                    .filter(|e| {
-                                        e.grayscale == standard.grayscale
-                                            && (e.opacity - standard.opacity).abs() <= 0.00001
-                                            && (e.brightness - standard.brightness).abs() <= 0.00001
-                                            && (e.contrast - standard.contrast).abs() <= 0.00001
+                                if let Ok(source) = read_part(&mut zip, &original) {
+                                    let view = EmbeddedImage {
+                                        data: source.clone().into(),
+                                        width: saved_w,
+                                        height: saved_h,
+                                        crop: Some(visible),
+                                        padding,
+                                        ..Default::default()
+                                    };
+                                    if crate::image_edit::flattened_png(&view)
+                                        .is_ok_and(|bytes| bytes == data)
+                                        && standard_crop.is_none_or(|v| v == [0.0, 0.0, 1.0, 1.0])
+                                    {
+                                        data = source;
+                                        restored_source = true;
+                                    }
+                                }
+                                if !restored_source {
+                                    padding.enabled = false;
+                                    trim_transparency = false;
+                                    visible = standard_crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+                                    crop = Some(visible);
+                                    warnings.push("An external editor changed padded image media/crop; its standard image takes precedence over AlphaDocs's reversible source.".into());
+                                }
+                            }
+                            let expected = if restored_source {
+                                [0.0, 0.0, 1.0, 1.0]
+                            } else {
+                                visible
+                            };
+                            if let Some(standard) = standard_crop
+                                && standard
+                                    .iter()
+                                    .zip(expected)
+                                    .any(|(a, b)| (a - b).abs() > 0.00001)
+                            {
+                                // A different editor changed the visible crop. Its standard
+                                // DrawingML geometry takes precedence over stale extensions.
+                                visible = [
+                                    standard[0].clamp(0.0, 1.0),
+                                    standard[1].clamp(0.0, 1.0),
+                                    standard[2].clamp(0.0, 1.0),
+                                    standard[3].clamp(0.0, 1.0),
+                                ];
+                                crop = Some(visible);
+                                trim_transparency = false;
+                                padding.enabled = false;
+                                if standard.iter().any(|v| !(0.0..=1.0).contains(v)) {
+                                    warnings.push("Externally edited negative image crop is approximated; AlphaDocs padding was cleared.".into());
+                                }
+                            }
+                            let mut source_width = properties
+                                .and_then(|n| n.attr("sourceWidth"))
+                                .and_then(|s| s.parse::<f32>().ok())
+                                .unwrap_or(width / (visible[2] - visible[0]));
+                            let mut source_height = properties
+                                .and_then(|n| n.attr("sourceHeight"))
+                                .and_then(|s| s.parse::<f32>().ok())
+                                .unwrap_or(height / (visible[3] - visible[1]));
+                            let geometry = EmbeddedImage {
+                                width: source_width,
+                                height: source_height,
+                                crop: Some(visible),
+                                padding,
+                                ..Default::default()
+                            };
+                            let (saved_visible_w, saved_visible_h) = geometry.visible_size();
+                            if (saved_visible_w - width).abs() > 0.02
+                                || (saved_visible_h - height).abs() > 0.02
+                            {
+                                (source_width, source_height) =
+                                    geometry.source_size_for_visible(width, height);
+                            }
+                            doc.blocks.push(Block::Image(EmbeddedImage {
+                                editable: None,
+                                id: properties
+                                    .and_then(|n| n.attr("objectId"))
+                                    .filter(|id| {
+                                        !doc.blocks
+                                            .iter()
+                                            .any(|b| matches!(b,Block::Image(i) if &i.id==id))
                                     })
-                                    .unwrap_or(standard)
-                            },
-                            alt_text: properties
-                                .and_then(|n| n.attr("descr"))
-                                .unwrap_or_default()
-                                .into(),
-                            title: properties
-                                .and_then(|n| n.attr("title"))
-                                .unwrap_or_default()
-                                .into(),
-                        }));
-                        if has_text {
-                            warnings.push(
-                                "Inline images are imported as separate image blocks.".into(),
-                            );
+                                    .map(str::to_owned)
+                                    .unwrap_or_else(new_object_id),
+                                placement: import_placement(drawing, properties),
+                                comments: properties
+                                    .and_then(|n| n.attr("comments"))
+                                    .and_then(|s| serde_json::from_str(s).ok())
+                                    .unwrap_or_default(),
+                                reactions: properties
+                                    .and_then(|n| n.attr("reactions"))
+                                    .and_then(|s| serde_json::from_str(s).ok())
+                                    .unwrap_or_default(),
+                                name: properties
+                                    .and_then(|n| n.attr("name"))
+                                    .unwrap_or(&target)
+                                    .into(),
+                                data: data.into(),
+                                width: source_width,
+                                height: source_height,
+                                crop,
+                                trim_transparency,
+                                trim_bounds,
+                                padding,
+                                effects: {
+                                    let lum = drawing.descendant("lum");
+                                    let fraction = |node: Option<&Node>, name: &str, default| {
+                                        node.and_then(|n| n.attr(name))
+                                            .and_then(|s| s.parse::<f32>().ok())
+                                            .map(|v| v / 100000.0)
+                                            .unwrap_or(default)
+                                    };
+                                    let standard = ImageEffects {
+                                        opacity: fraction(
+                                            drawing.descendant("alphaModFix"),
+                                            "amt",
+                                            1.0,
+                                        ),
+                                        brightness: fraction(lum, "bright", 0.0),
+                                        contrast: fraction(lum, "contrast", 0.0),
+                                        grayscale: drawing.descendant("grayscl").is_some(),
+                                    };
+                                    let stored: Option<ImageEffects> = properties
+                                        .and_then(|n| n.attr("effects"))
+                                        .and_then(|s| serde_json::from_str(s).ok());
+                                    stored
+                                        .filter(|e| {
+                                            e.grayscale == standard.grayscale
+                                                && (e.opacity - standard.opacity).abs() <= 0.00001
+                                                && (e.brightness - standard.brightness).abs()
+                                                    <= 0.00001
+                                                && (e.contrast - standard.contrast).abs() <= 0.00001
+                                        })
+                                        .unwrap_or(standard)
+                                },
+                                alt_text: properties
+                                    .and_then(|n| n.attr("descr"))
+                                    .unwrap_or_default()
+                                    .into(),
+                                title: properties
+                                    .and_then(|n| n.attr("title"))
+                                    .unwrap_or_default()
+                                    .into(),
+                            }));
+                            if has_text {
+                                warnings.push(
+                                    "Inline images are imported as separate image blocks.".into(),
+                                );
+                            }
+                        } else {
+                            warnings.push(format!("Could not load embedded image: {target}"));
                         }
                     } else {
-                        warnings.push(format!("Could not load embedded image: {target}"));
+                        warnings.push(
+                            "An unsupported drawing was omitted; any contained text was retained."
+                                .into(),
+                        );
+                        let mut content = Vec::new();
+                        drawing.descendants("txbxContent", &mut content);
+                        for body in content {
+                            let mut paragraphs = Vec::new();
+                            body.descendants("p", &mut paragraphs);
+                            for child in paragraphs {
+                                doc.blocks.push(Block::Paragraph(paragraph(
+                                    child, &rels, &styles, &numbering,
+                                )));
+                            }
+                        }
+                    }
+                }
+                let mut legacy_pictures = Vec::new();
+                n.descendants("pict", &mut legacy_pictures);
+                for picture in legacy_pictures {
+                    warnings.push("Legacy VML geometry is unsupported; text box contents were retained as editable paragraphs.".into());
+                    let mut contents = Vec::new();
+                    picture.descendants("txbxContent", &mut contents);
+                    for body in contents {
+                        let mut paragraphs = Vec::new();
+                        body.descendants("p", &mut paragraphs);
+                        for child in paragraphs {
+                            doc.blocks.push(Block::Paragraph(paragraph(
+                                child, &rels, &styles, &numbering,
+                            )));
+                        }
                     }
                 }
             }
             "tbl" => {
-                let rows = n
-                    .children
-                    .iter()
-                    .filter(|n| n.name == "tr")
-                    .map(|r| {
-                        r.children
-                            .iter()
-                            .filter(|n| n.name == "tc")
-                            .map(|c| {
-                                let mut paragraphs = c
-                                    .children
-                                    .iter()
-                                    .filter(|n| n.name == "p")
-                                    .map(|p| paragraph(p, &rels, &styles, &numbering));
-                                let mut p = paragraphs.next().unwrap_or_default();
-                                for more in paragraphs {
-                                    p.chars.push(StyledChar {
-                                        ch: '\n',
-                                        style: p.style.clone(),
-                                    });
-                                    p.chars.extend(more.chars);
-                                }
-                                p
+                let row_nodes: Vec<_> = n.children.iter().filter(|n| n.name == "tr").collect();
+                let row_count = row_nodes.len();
+                let mut rows = Vec::new();
+                for (ri, r) in row_nodes.into_iter().enumerate() {
+                    let cells: Vec<_> = r.children.iter().filter(|n| n.name == "tc").collect();
+                    let count = cells.len();
+                    let mut row = Vec::new();
+                    for (ci, c) in cells.into_iter().enumerate() {
+                        let mut nodes = Vec::new();
+                        for child in &c.children {
+                            body_nodes(child, &mut nodes);
+                        }
+                        let mut paragraphs = nodes
+                            .into_iter()
+                            .flat_map(|node| {
+                                let mut paragraphs = Vec::new();
+                                node.descendants("p", &mut paragraphs);
+                                paragraphs
                             })
-                            .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>();
+                            .map(|n| paragraph(n, &rels, &styles, &numbering));
+                        let mut p = paragraphs.next().unwrap_or_default();
+                        for more in paragraphs {
+                            p.chars.push(StyledChar {
+                                ch: '\n',
+                                style: p.style.clone(),
+                            });
+                            p.chars.extend(more.chars);
+                        }
+                        if c.descendant("tbl").is_some() {
+                            warnings.push("Nested tables are flattened to editable text within the containing cell.".into());
+                        }
+                        if c.descendant("drawing").is_some() || c.descendant("oMath").is_some() {
+                            warnings.push("Objects inside table cells are unsupported; cell text is retained.".into());
+                        }
+                        p.formula = table_formula(c);
+                        let mut style = BoxStyle::unbordered();
+                        if let Some(id) = n
+                            .child("tblPr")
+                            .and_then(|pr| pr.child("tblStyle"))
+                            .and_then(Node::val)
+                        {
+                            for named in styles.chain(id) {
+                                if let Some(pr) = named.child("tblPr") {
+                                    style = table_cell_style(pr, style, ri, ci, row_count, count);
+                                }
+                            }
+                        }
+                        if let Some(pr) = n.child("tblPr") {
+                            style = table_cell_style(pr, style, ri, ci, row_count, count);
+                        }
+                        if let Some(pr) = c.child("tcPr") {
+                            style = read_box_style(pr, "tcBorders", style);
+                        }
+                        p.box_style = (style != BoxStyle::default()).then_some(style);
+                        row.push(p);
+                    }
+                    rows.push(row);
+                }
                 doc.blocks.push(Block::Table(rows));
             }
             "sectPr" => {
@@ -1419,6 +1906,75 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
             _ => warnings.push(format!("Unsupported OOXML block: {}", n.name)),
         }
     }
+    // Keep note contents readable/editable even though native dynamic footnote
+    // placement is not part of this document model yet.
+    for (part, tag, reference, label) in [
+        (
+            "word/footnotes.xml",
+            "footnote",
+            "footnoteReference",
+            "Footnote",
+        ),
+        (
+            "word/endnotes.xml",
+            "endnote",
+            "endnoteReference",
+            "Endnote",
+        ),
+    ] {
+        if root.descendant(reference).is_none() {
+            continue;
+        }
+        match read_xml(&mut zip, part) {
+            Ok(notes) => {
+                fn collect<'a>(node: &'a Node, tag: &str, out: &mut Vec<&'a Node>) {
+                    if node.name == tag {
+                        out.push(node);
+                    } else {
+                        for child in &node.children {
+                            collect(child, tag, out);
+                        }
+                    }
+                }
+                let mut entries = Vec::new();
+                collect(&notes, tag, &mut entries);
+                for note in entries {
+                    if note.attr("type").is_some_and(|kind| kind != "normal") {
+                        continue;
+                    }
+                    let Some(id) = note
+                        .attr("id")
+                        .and_then(|s| s.parse::<i32>().ok())
+                        .filter(|id| *id >= 0)
+                    else {
+                        continue;
+                    };
+                    let mut paragraphs = Vec::new();
+                    collect(note, "p", &mut paragraphs);
+                    for (index, node) in paragraphs.into_iter().enumerate() {
+                        let mut p = paragraph(node, &rels, &styles, &numbering);
+                        if index == 0 {
+                            let prefix = format!("[{label} {id}] ");
+                            let style = p.style.clone();
+                            p.replace_text(
+                                0..0,
+                                prefix
+                                    .chars()
+                                    .map(|ch| StyledChar {
+                                        ch,
+                                        style: style.clone(),
+                                    })
+                                    .collect(),
+                            );
+                        }
+                        doc.blocks.push(Block::Paragraph(p));
+                    }
+                }
+                warnings.push(format!("{label} contents are retained as editable paragraphs at the end; dynamic note placement/references are not supported."));
+            }
+            Err(error) => warnings.push(format!("Could not import {label} contents: {error}")),
+        }
+    }
     if let Some(c) = root
         .descendant("background")
         .and_then(|n| n.attr("color"))
@@ -1452,6 +2008,214 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn package_with_body(body: &str) -> std::path::PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("alphadocs-word-fixture-{}.docx", new_object_id()));
+        let mut zip = ZipWriter::new(File::create(&path).unwrap());
+        zip.start_file("word/document.xml", SimpleFileOptions::default())
+            .unwrap();
+        write!(zip, "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>{body}</w:body></w:document>").unwrap();
+        zip.finish().unwrap();
+        path
+    }
+
+    #[test]
+    fn cell_shading_borders_and_real_word_formula_fields_roundtrip() {
+        let mut editor = crate::engine::Editor::new(Document::new("Editable calculations"));
+        editor.insert_table(3, 2);
+        let block = editor.caret.address.block;
+        let Block::Table(rows) = &mut editor.doc.blocks[block] else {
+            panic!()
+        };
+        rows[0][0] = Paragraph::from_text("10.5");
+        rows[1][0] = Paragraph::from_text("4");
+        let style = BoxStyle {
+            fill: Some([211, 227, 253]),
+            borders: [CellBorder {
+                colour: [11, 87, 208],
+                width: 1.5,
+            }; 4],
+        };
+        rows[1][0].box_style = Some(style);
+        editor.place(
+            Position {
+                address: Address {
+                    block,
+                    row: 2,
+                    cell: 0,
+                },
+                offset: 0,
+            },
+            false,
+        );
+        editor
+            .set_table_formula(TableFormula {
+                expression: "=SUM(ABOVE)".into(),
+                decimals: Some(2),
+                word_number_format: None,
+            })
+            .unwrap();
+        let at = editor.caret.address;
+        assert_eq!(editor.doc.paragraph(at).unwrap().text(), "14.50");
+        let original = editor.doc.clone();
+        assert!(
+            editor
+                .set_table_formula(TableFormula {
+                    expression: "=A3".into(),
+                    decimals: None,
+                    word_number_format: None,
+                })
+                .is_err()
+        );
+        assert_eq!(editor.doc, original);
+        editor.insert("x");
+        assert!(editor.doc.paragraph(at).unwrap().formula.is_none());
+        editor.undo();
+        assert_eq!(editor.doc, original);
+        let path =
+            std::env::temp_dir().join(format!("alphadocs-table-format-{}.docx", new_object_id()));
+        export(&editor.doc, &path).unwrap();
+        let (imported, warnings) = import(&path).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(imported.blocks, editor.doc.blocks);
+        let native: Document =
+            serde_json::from_slice(&serde_json::to_vec(&editor.doc).unwrap()).unwrap();
+        native.validate().unwrap();
+        assert_eq!(native, editor.doc);
+        let mut source = ZipArchive::new(File::open(&path).unwrap()).unwrap();
+        let mut xml = String::new();
+        source
+            .by_name("word/document.xml")
+            .unwrap()
+            .read_to_string(&mut xml)
+            .unwrap();
+        assert!(xml.contains("<w:fldSimple w:instr=\"=SUM(ABOVE)"));
+        assert!(xml.contains("<w:tcBorders>"));
+        assert!(xml.contains("w:fill=\"D3E3FD\""));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn word_paragraph_borders_never_replace_story_text_with_rules() {
+        let source = package_with_body(
+            r#"
+            <w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="8"/></w:pBdr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Chapter one — café 😀</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pBdr><w:top w:val="nil"/><w:bottom w:val="none"/></w:pBdr></w:pPr><w:r><w:t>The story remains editable.</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pBdr/></w:pPr><w:r><w:t>Empty overrides are not rules.</w:t></w:r></w:p>
+            <w:tbl><w:tr><w:tc><w:p><w:r><w:t>Table text survives too.</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+            <w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6"/></w:pBdr></w:pPr></w:p>
+            <w:p><w:pPr><w:pBdr><w:bottom w:val="nil"/></w:pBdr></w:pPr></w:p>
+        "#,
+        );
+        let (doc, _) = import(&source).unwrap();
+        assert_eq!(doc.blocks.len(), 6);
+        assert!(matches!(doc.blocks[4], Block::Rule));
+        assert!(matches!(doc.blocks[5], Block::Paragraph(_)));
+        let first = doc.paragraph(Address::default()).unwrap();
+        assert_eq!(first.text(), "Chapter one — café 😀");
+        assert!(first.chars.iter().all(|c| c.style.bold));
+        assert_eq!(
+            doc.blocks
+                .iter()
+                .filter(|b| matches!(b, Block::Rule))
+                .count(),
+            1
+        );
+        let mut editor = crate::engine::Editor::new(doc);
+        let original = editor.doc.text();
+        editor.insert("Edited: ");
+        editor.undo();
+        assert_eq!(editor.doc.text(), original);
+        let target = source.with_extension("roundtrip.docx");
+        export(&editor.doc, &target).unwrap();
+        let (roundtrip, _) = import(&target).unwrap();
+        assert_eq!(roundtrip.text(), original);
+        assert_eq!(
+            roundtrip.paragraph(Address::default()).unwrap().chars,
+            first_chars(&editor)
+        );
+        std::fs::remove_file(source).unwrap();
+        std::fs::remove_file(target).unwrap();
+    }
+
+    fn first_chars(editor: &crate::engine::Editor) -> SharedVec<StyledChar> {
+        editor
+            .doc
+            .paragraph(Address::default())
+            .unwrap()
+            .chars
+            .clone()
+    }
+
+    #[test]
+    fn word_wrappers_legacy_textboxes_nested_cell_text_and_custom_formula_masks_retain_content() {
+        let source = package_with_body(
+            r#"
+            <w:sdt><w:sdtContent><w:p><w:r><w:t>Wrapped chapter</w:t></w:r></w:p></w:sdtContent></w:sdt>
+            <w:p><mc:AlternateContent><mc:Choice><w:r><w:t>Selected branch</w:t></w:r></mc:Choice><mc:Fallback><w:r><w:t>Duplicate fallback</w:t></w:r></mc:Fallback></mc:AlternateContent></w:p>
+            <w:p><w:r><w:pict><v:shape><v:textbox><w:txbxContent><w:p><w:r><w:t>Legacy editable text</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>
+            <w:tbl><w:tr><w:tc><w:p><w:r><w:t>Outer cell</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Nested cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:tc></w:tr></w:tbl>
+            <w:tbl><w:tr><w:tc><w:p><w:fldSimple w:instr='=1+2 \# "$#,##0.00"'><w:r><w:t>$3.00</w:t></w:r></w:fldSimple></w:p></w:tc></w:tr></w:tbl>
+        "#,
+        );
+        let (doc, warnings) = import(&source).unwrap();
+        let text = doc.text();
+        for expected in [
+            "Wrapped chapter",
+            "Selected branch",
+            "Legacy editable text",
+            "Outer cell",
+            "Nested cell",
+            "$3.00",
+        ] {
+            assert!(text.contains(expected), "Missing {expected}: {text}");
+        }
+        assert!(!text.contains("Duplicate fallback"));
+        assert!(warnings.iter().any(|w| w.contains("Legacy VML")));
+        assert!(warnings.iter().any(|w| w.contains("Nested tables")));
+        let block = doc
+            .blocks
+            .iter()
+            .rposition(|b| matches!(b, Block::Table(_)))
+            .unwrap();
+        let at = Address {
+            block,
+            row: 0,
+            cell: 0,
+        };
+        assert_eq!(
+            doc.paragraph(at)
+                .unwrap()
+                .formula
+                .as_ref()
+                .unwrap()
+                .word_number_format
+                .as_deref(),
+            Some("$#,##0.00")
+        );
+        let mut editor = crate::engine::Editor::new(doc);
+        editor.place(
+            Position {
+                address: at,
+                offset: 0,
+            },
+            false,
+        );
+        let before = editor.doc.clone();
+        assert!(editor.recalculate_table().is_err());
+        assert_eq!(before, editor.doc);
+        let target = source.with_extension("roundtrip.docx");
+        export(&editor.doc, &target).unwrap();
+        let (loaded, _) = import(&target).unwrap();
+        assert_eq!(loaded.text(), editor.doc.text());
+        assert_eq!(
+            loaded.paragraph(at).unwrap().formula,
+            editor.doc.paragraph(at).unwrap().formula
+        );
+        std::fs::remove_file(source).unwrap();
+        std::fs::remove_file(target).unwrap();
+    }
+
     #[test]
     fn checklist_word_controls_preserve_states_text_styles_and_all_tabs() {
         let task = |checked| {

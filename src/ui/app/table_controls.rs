@@ -1,6 +1,264 @@
 use super::*;
 use std::collections::BTreeMap;
 
+pub(super) struct FormatDraft {
+    document: String,
+    tab: usize,
+    revision: u64,
+    caret: Position,
+    anchor: Position,
+    selection: Option<crate::engine::TableSelection>,
+    style: BoxStyle,
+    fill_enabled: bool,
+    fill: [u8; 3],
+    border: [u8; 3],
+    width: f32,
+    change_borders: bool,
+    formula: String,
+    decimals: Option<u8>,
+    error: String,
+}
+impl FormatDraft {
+    pub fn new(editor: &crate::engine::Editor) -> Self {
+        let style = editor
+            .doc
+            .paragraph(editor.caret.address)
+            .and_then(|p| p.box_style)
+            .unwrap_or_default();
+        Self {
+            document: editor.doc.id.clone(),
+            tab: editor.doc.active_tab,
+            revision: editor.revision,
+            caret: editor.caret,
+            anchor: editor.anchor,
+            selection: editor.table_selection(),
+            style,
+            fill_enabled: style.fill.is_some(),
+            fill: style.fill.unwrap_or([211, 227, 253]),
+            border: style.borders[0].colour,
+            width: style.borders[0].width,
+            change_borders: false,
+            formula: editor
+                .doc
+                .paragraph(editor.caret.address)
+                .and_then(|p| p.formula.as_ref())
+                .map(|f| f.expression.clone())
+                .unwrap_or_else(|| {
+                    if editor.caret.address.row > 0 {
+                        "=SUM(ABOVE)".into()
+                    } else {
+                        "=SUM(LEFT)".into()
+                    }
+                }),
+            decimals: editor
+                .doc
+                .paragraph(editor.caret.address)
+                .and_then(|p| p.formula.as_ref())
+                .and_then(|f| f.decimals),
+            error: String::new(),
+        }
+    }
+    fn current(&self, editor: &crate::engine::Editor) -> bool {
+        self.document == editor.doc.id
+            && self.tab == editor.doc.active_tab
+            && self.revision == editor.revision
+            && self.caret == editor.caret
+            && self.anchor == editor.anchor
+            && self.selection == editor.table_selection()
+            && matches!(
+                editor.doc.blocks.get(editor.caret.address.block),
+                Some(Block::Table(_))
+            )
+    }
+}
+impl AlphaDocs {
+    pub(super) fn table_formula_dialog(&mut self, ui: &mut Ui, close: &mut bool) {
+        let Some(mut draft) = self.table_format_draft.take() else {
+            *close = true;
+            return;
+        };
+        ui.label(RichText::new("Table formula").size(24.0));
+        ui.add_space(12.0);
+        ui.label(
+            "Calculate a value in the current cell. This replaces its text; Undo restores it.",
+        );
+        ui.add_space(16.0);
+        ui.label("Formula");
+        editable_object_ui::outlined(ui, self.palette, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut draft.formula)
+                    .frame(Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
+        });
+        ui.add_space(8.0);
+        ui.label(RichText::new("Examples: =SUM(ABOVE), =A2*B2, =AVERAGE(A1:A4)\nSUM, PRODUCT, AVERAGE, COUNT, MIN, MAX, ABS, INT, ROUND. Use + − * / ^ and parentheses.").color(self.palette.muted).size(12.0));
+        ui.add_space(12.0);
+        egui::ComboBox::from_label("Number format")
+            .selected_text(
+                draft
+                    .decimals
+                    .map(|n| format!("{n} decimal places"))
+                    .unwrap_or_else(|| "Automatic".into()),
+            )
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut draft.decimals, None, "Automatic");
+                for n in [0, 1, 2, 3, 4, 6, 8] {
+                    ui.selectable_value(
+                        &mut draft.decimals,
+                        Some(n),
+                        format!("{n} decimal places"),
+                    );
+                }
+            });
+        ui.add_space(12.0);
+        ui.label(RichText::new("After changing source numbers, choose Recalculate table. Typing into a calculated cell replaces its formula.").color(self.palette.muted).size(12.0));
+        if !draft.error.is_empty() {
+            ui.add_space(12.0);
+            ui.colored_label(self.palette.text, &draft.error);
+        }
+        ui.add_space(20.0);
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), 40.0),
+            UiLayout::right_to_left(Align::Center),
+            |ui| {
+                if primary(
+                    ui,
+                    "Calculate",
+                    self.palette,
+                    draft.current(&self.session.editor)
+                        && !self.session.viewing
+                        && !draft.formula.trim().is_empty(),
+                )
+                .clicked()
+                {
+                    match self.session.editor.set_table_formula(TableFormula {
+                        expression: draft.formula.trim().into(),
+                        decimals: draft.decimals,
+                        word_number_format: None,
+                    }) {
+                        Ok(()) => *close = true,
+                        Err(error) => draft.error = error,
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    *close = true;
+                }
+            },
+        );
+        if !*close {
+            self.table_format_draft = Some(draft);
+        }
+    }
+    pub(super) fn table_format_dialog(&mut self, ui: &mut Ui, close: &mut bool) {
+        let Some(mut draft) = self.table_format_draft.take() else {
+            *close = true;
+            return;
+        };
+        ui.label(RichText::new("Cell background and borders").size(24.0));
+        ui.add_space(12.0);
+        let count = self
+            .session
+            .editor
+            .selected_table_cell_addresses()
+            .len()
+            .max(1);
+        ui.label(if count == 1 {
+            "Applies to the current cell.".into()
+        } else {
+            format!("Applies to {count} selected cells.")
+        });
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            preferences::checkbox(
+                ui,
+                &mut draft.fill_enabled,
+                "Background colour",
+                self.palette,
+            );
+            ui.add_enabled_ui(draft.fill_enabled, |ui| {
+                ui.color_edit_button_srgb(&mut draft.fill);
+            });
+        });
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            ui.label("Border colour");
+            draft.change_borders |= ui.color_edit_button_srgb(&mut draft.border).changed();
+            ui.label("Width");
+            draft.change_borders |= ui
+                .add(
+                    egui::DragValue::new(&mut draft.width)
+                        .range(0.0..=12.0)
+                        .speed(0.25)
+                        .suffix(" pt"),
+                )
+                .changed();
+        });
+        ui.label(
+            RichText::new("Use 0 pt to hide borders. Border changes apply to all four edges.")
+                .color(self.palette.muted)
+                .size(12.0),
+        );
+        ui.add_space(16.0);
+        let mut style = draft.style;
+        style.fill = draft.fill_enabled.then_some(draft.fill);
+        if draft.change_borders {
+            style.borders = [CellBorder {
+                colour: draft.border,
+                width: draft.width,
+            }; 4];
+        }
+        let (preview, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::hover());
+        ui.painter().rect_filled(preview, 4.0, Color32::WHITE);
+        paint_box(ui, preview.shrink(4.0), style, 1.0);
+        ui.painter().text(
+            preview.center(),
+            Align2::CENTER_CENTER,
+            "Cell preview",
+            FontId::proportional(13.0),
+            Color32::from_gray(31),
+        );
+        ui.add_space(20.0);
+        let current = draft.current(&self.session.editor);
+        if !current {
+            ui.colored_label(
+                self.palette.muted,
+                "The document changed. Reopen cell formatting to apply changes.",
+            );
+        }
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), 40.0),
+            UiLayout::right_to_left(Align::Center),
+            |ui| {
+                let apply = primary(
+                    ui,
+                    "Apply",
+                    self.palette,
+                    current && style.valid() && !self.session.viewing,
+                );
+                tools::bounds(ui, "cell_format_apply", &apply);
+                if apply.clicked() {
+                    self.session.editor.paragraph_format(|p| {
+                        let mut target = p.box_style.unwrap_or_default();
+                        target.fill = style.fill;
+                        if draft.change_borders {
+                            target.borders = style.borders;
+                        }
+                        p.box_style = Some(target);
+                    });
+                    *close = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    *close = true;
+                }
+            },
+        );
+        if !*close {
+            self.table_format_draft = Some(draft);
+        }
+    }
+}
+
 pub(super) struct TableDrag {
     block: usize,
     start: Pos2,
@@ -226,4 +484,98 @@ pub(super) fn show(
         }
     }
     result
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+    fn frame(ctx: &Context, app: &mut AlphaDocs, events: Vec<Event>) {
+        app.last_autosave = Instant::now();
+        let mut frame = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1100.0, 760.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| app.update_ui(ui),
+        );
+        frame.textures_delta.clear();
+    }
+    #[test]
+    fn row_background_apply_preserves_each_cells_edges_and_is_one_undo_in_both_themes() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let ctx = Context::default();
+            fonts::install(&ctx);
+            let mut app = AlphaDocs::fresh(
+                &ctx,
+                Preferences {
+                    theme,
+                    ..Default::default()
+                },
+                vec![],
+            );
+            app.home = false;
+            app.session.editor.insert_table(2, 2);
+            let block = app.session.editor.caret.address.block;
+            let Block::Table(rows) = &mut app.session.editor.doc.blocks[block] else {
+                panic!()
+            };
+            rows[0][0].box_style = Some(BoxStyle {
+                borders: [CellBorder {
+                    colour: [200, 10, 10],
+                    width: 2.0,
+                }; 4],
+                ..Default::default()
+            });
+            rows[0][1].box_style = Some(BoxStyle {
+                borders: [CellBorder {
+                    colour: [10, 10, 200],
+                    width: 0.25,
+                }; 4],
+                ..Default::default()
+            });
+            app.session.editor.select_table_row(block, 0);
+            let before = app.session.editor.doc.clone();
+            app.table_format_draft = Some(FormatDraft::new(&app.session.editor));
+            let draft = app.table_format_draft.as_mut().unwrap();
+            draft.fill_enabled = true;
+            draft.fill = [211, 227, 253];
+            app.dialog = Some(Dialog::TableFormat);
+            frame(&ctx, &mut app, vec![]);
+            frame(&ctx, &mut app, vec![]);
+            let pos = ctx
+                .data(|d| d.get_temp::<Rect>(Id::new("cell_format_apply")))
+                .unwrap()
+                .center();
+            frame(
+                &ctx,
+                &mut app,
+                vec![
+                    Event::PointerMoved(pos),
+                    Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            let Block::Table(rows) = &app.session.editor.doc.blocks[block] else {
+                panic!()
+            };
+            assert_eq!(rows[0][0].box_style.unwrap().fill, Some([211, 227, 253]));
+            assert_eq!(rows[0][1].box_style.unwrap().fill, Some([211, 227, 253]));
+            assert_eq!(rows[0][0].box_style.unwrap().borders[0].width, 2.0);
+            assert_eq!(rows[0][1].box_style.unwrap().borders[0].width, 0.25);
+            assert!(rows[1][0].box_style.is_none());
+            app.session.editor.undo();
+            assert_eq!(app.session.editor.doc, before);
+        }
+    }
 }

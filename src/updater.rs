@@ -518,6 +518,9 @@ fn platform_helper(
 ) -> Result<Command, String> {
     let mut command = Command::new(&update.asset);
     command
+        // Shortcuts start AlphaDocs inside its installation folder. A helper
+        // inheriting that CWD locks the directory it must rename on Windows.
+        .current_dir(update.asset.parent().ok_or("Invalid update staging path")?)
         .arg("--update")
         .arg(old_pid.to_string())
         .arg(&update.log);
@@ -669,6 +672,25 @@ fn check_writable_parent(path: &Path) -> Result<(), DownloadError> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_update_helper_uses_staging_directory_not_installed_working_directory() {
+        let update = PreparedUpdate {
+            version: "1.2.3".into(),
+            asset: PathBuf::from(r"C:\isolated\updates\stage\Setup.exe"),
+            log: PathBuf::from(r"C:\isolated\updates\stage\install.log"),
+            expected_size: 1,
+            expected_sha256: "0".repeat(64),
+        };
+        let command = platform_helper(&update, 123, true).unwrap();
+        assert_eq!(command.get_current_dir(), update.asset.parent());
+        assert_eq!(command.get_program(), update.asset.as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["--update", "123", update.log.to_str().unwrap(), "--dark"]
+        );
+    }
 
     fn temporary_dir() -> PathBuf {
         let path = std::env::temp_dir().join(format!(

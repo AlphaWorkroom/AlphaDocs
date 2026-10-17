@@ -7,6 +7,7 @@ mod colours;
 mod comments;
 mod dialogs;
 mod document_tabs;
+mod editable_object_ui;
 mod emoji_picker;
 mod exporting;
 mod feature_search;
@@ -73,6 +74,9 @@ enum Dialog {
     Symbols,
     Emojis,
     ColourPicker,
+    TableFormat,
+    TableFormula,
+    EditableObject,
     Print,
     Share,
     Delete,
@@ -101,6 +105,9 @@ enum Action {
     Count,
     History,
     Image,
+    Object(Option<ShapeKind>),
+    CellFormat,
+    CellFormula,
     Link,
     Table(usize, usize),
     Break,
@@ -192,6 +199,8 @@ pub struct AlphaDocs {
     emoji_picker: emoji_picker::EmojiPicker,
     colour_picker: Option<colours::PickerState>,
     table_drag: Option<table_controls::TableDrag>,
+    table_format_draft: Option<table_controls::FormatDraft>,
+    object_draft: Option<editable_object_ui::Draft>,
     context_pointer: super::platform::ContextPointer,
     tab_rename: Option<(String, String)>,
     view_tab_id: String,
@@ -340,6 +349,8 @@ impl AlphaDocs {
             emoji_picker: emoji_picker::EmojiPicker::default(),
             colour_picker: None,
             table_drag: None,
+            table_format_draft: None,
+            object_draft: None,
             context_pointer: Default::default(),
             tab_rename: None,
             feature_search_open: false,
@@ -793,6 +804,9 @@ impl AlphaDocs {
                     | Action::Break
                     | Action::Rule
                     | Action::Image
+                    | Action::Object(_)
+                    | Action::CellFormat
+                    | Action::CellFormula
                     | Action::Symbols
                     | Action::Emojis
                     | Action::Comment
@@ -805,6 +819,27 @@ impl AlphaDocs {
             return;
         }
         match a {
+            Action::Object(kind) => self.open_editable_object(kind, None),
+            Action::CellFormat | Action::CellFormula => {
+                if matches!(
+                    self.session
+                        .editor
+                        .doc
+                        .blocks
+                        .get(self.session.editor.caret.address.block),
+                    Some(Block::Table(_))
+                ) {
+                    self.table_format_draft =
+                        Some(table_controls::FormatDraft::new(&self.session.editor));
+                    self.dialog = Some(if matches!(a, Action::CellFormula) {
+                        Dialog::TableFormula
+                    } else {
+                        Dialog::TableFormat
+                    });
+                } else {
+                    self.status = "Select a table cell first".into();
+                }
+            }
             Action::Tool(tool) => self.open_tool(tool),
             Action::Share => self.open_sharing(),
             Action::ToggleMenus => self.toggle_menus(ctx),
@@ -948,7 +983,14 @@ impl AlphaDocs {
                     .save_file()
                 {
                     self.status = match compat::docx::export(&self.session.editor.doc, &path) {
-                        Ok(()) => "DOCX exported".into(),
+                        Ok(()) => {
+                            let notices = compat::docx::export_notices(&self.session.editor.doc);
+                            if !notices.is_empty() {
+                                self.message = format!("DOCX exported\n\n{}", notices.join("\n\n"));
+                                self.dialog = Some(Dialog::ExportResult);
+                            }
+                            "DOCX exported".into()
+                        }
                         Err(e) => e,
                     };
                 }
@@ -1264,6 +1306,16 @@ impl AlphaDocs {
                         }
                     }
                     ui.menu_button("Table", |ui| self.table_picker(ui));
+                    if menu(ui, "Equation…", "", true) {
+                        self.queue(Action::Object(None));
+                    }
+                    ui.menu_button("Text box and shapes", |ui| {
+                        for kind in ShapeKind::ALL {
+                            if menu(ui, kind.label(), "", true) {
+                                self.queue(Action::Object(Some(kind)));
+                            }
+                        }
+                    });
                     if menu(
                         ui,
                         "Comment",
@@ -1301,10 +1353,10 @@ impl AlphaDocs {
                             .get(self.session.editor.caret.address.block),
                         Some(Block::Table(_))
                     );
-                    ui.add_enabled_ui(table, |ui| {
+                    if table {
                         ui.separator();
                         self.table_commands(ui);
-                    });
+                    }
                 });
             });
             ui.menu_button("Format", |ui| {
@@ -1594,6 +1646,27 @@ impl AlphaDocs {
         if table_commands(ui, &mut self.session.editor, self.session.viewing) {
             self.refocus = true;
             self.scroll_caret = true;
+        }
+        if menu(
+            ui,
+            "Cell background and borders…",
+            "",
+            !self.session.viewing,
+        ) {
+            self.table_format_draft = Some(table_controls::FormatDraft::new(&self.session.editor));
+            self.dialog = Some(Dialog::TableFormat);
+        }
+        if menu(ui, "Formula…", "", !self.session.viewing) {
+            self.table_format_draft = Some(table_controls::FormatDraft::new(&self.session.editor));
+            self.dialog = Some(Dialog::TableFormula);
+        }
+        if menu(ui, "Recalculate table", "", !self.session.viewing) {
+            self.status = self
+                .session
+                .editor
+                .recalculate_table()
+                .map(|()| "Table calculations updated".into())
+                .unwrap_or_else(|e| e);
         }
     }
     fn table_picker(&mut self, ui: &mut Ui) {
@@ -2353,6 +2426,19 @@ impl AlphaDocs {
                         );
                     }
                 }
+                for (pn, rect, style) in layout::paragraph_boxes(l, &self.session.editor.doc) {
+                    if pn == page {
+                        paint_box(
+                            ui,
+                            Rect::from_min_size(
+                                o + rect.min.to_vec2() * scale,
+                                rect.size() * scale,
+                            ),
+                            style,
+                            scale,
+                        );
+                    }
+                }
                 for object in &l.objects {
                     match object {
                         Object::Image {
@@ -2396,6 +2482,22 @@ impl AlphaDocs {
                             }) && let Ok(decoded) = image::load_from_memory(&image.data)
                             {
                                 let mut im = decoded.to_rgba8();
+                                if p.dark
+                                    && image.editable.as_ref().is_some_and(|object| {
+                                        !matches!(
+                                            &object.source,
+                                            ObjectSource::Drawing { fill: Some(_), .. }
+                                        )
+                                    })
+                                {
+                                    for pixel in im.pixels_mut() {
+                                        if pixel[0] <= 32 && pixel[1] <= 32 && pixel[2] <= 32 {
+                                            pixel[0] = 223;
+                                            pixel[1] = 227;
+                                            pixel[2] = 235;
+                                        }
+                                    }
+                                }
                                 crate::image_edit::apply_effects(&mut im, effects);
                                 let color = egui::ColorImage::from_rgba_unmultiplied(
                                     [im.width() as usize, im.height() as usize],
@@ -2485,7 +2587,16 @@ impl AlphaDocs {
                                     !self.session.viewing,
                                 );
                                 ui.separator();
-                                if menu(ui, "Image options", "", true) {
+                                if menu(
+                                    ui,
+                                    if image.editable.is_some() {
+                                        "Edit object…"
+                                    } else {
+                                        "Image options"
+                                    },
+                                    "",
+                                    true,
+                                ) {
                                     action.options = true;
                                 }
                                 if menu(ui, "Add comment", "Ctrl+Alt+M", !self.session.viewing) {
@@ -2529,6 +2640,22 @@ impl AlphaDocs {
                             rect,
                             address,
                         } if *pn == page => {
+                            let style = self
+                                .session
+                                .editor
+                                .doc
+                                .paragraph(*address)
+                                .and_then(|p| p.box_style)
+                                .unwrap_or_default();
+                            paint_box(
+                                ui,
+                                Rect::from_min_size(
+                                    o + rect.min.to_vec2() * scale,
+                                    rect.size() * scale,
+                                ),
+                                style,
+                                scale,
+                            );
                             if selected_cells.contains(address) {
                                 ui.painter().rect_filled(
                                     Rect::from_min_size(
@@ -2539,15 +2666,6 @@ impl AlphaDocs {
                                     p.selection,
                                 );
                             }
-                            ui.painter().rect_stroke(
-                                Rect::from_min_size(
-                                    o + rect.min.to_vec2() * scale,
-                                    rect.size() * scale,
-                                ),
-                                0.0,
-                                Stroke::new(0.7, p.border),
-                                egui::StrokeKind::Inside,
-                            );
                         }
                         Object::Rule { page: pn, rect } if *pn == page => {
                             ui.painter().line_segment(
@@ -3007,68 +3125,96 @@ impl AlphaDocs {
                 }
             }
             response.context_menu(|ui| {
-                let (corrected, open_proof) = live_proofing::context_menu(
-                    ui,
-                    &mut self.live_proof,
-                    &mut self.session.editor,
-                    &mut self.prefs,
-                    &mut self.status,
-                    self.session.viewing,
-                );
-                if corrected {
-                    self.refocus = true;
-                    self.scroll_caret = true;
-                }
-                if open_proof {
-                    self.action = Some(Action::Proofing);
-                }
-                if matches!(
-                    self.session
-                        .editor
-                        .doc
-                        .blocks
-                        .get(self.session.editor.caret.address.block),
-                    Some(Block::Table(_))
-                ) {
-                    if table_commands(ui, &mut self.session.editor, self.session.viewing) {
-                        self.refocus = true;
-                        self.scroll_caret = true;
-                    }
-                    ui.separator();
-                }
-                if menu(
-                    ui,
-                    "Cut",
-                    "Ctrl+X",
-                    self.session.editor.selected() && !self.session.viewing,
-                ) {
-                    self.action = Some(Action::Cut);
-                }
-                if menu(ui, "Copy", "Ctrl+C", self.session.editor.selected()) {
-                    self.action = Some(Action::Copy);
-                }
-                if menu(ui, "Paste", "Ctrl+V", !self.session.viewing) {
-                    self.action = Some(Action::Paste);
-                }
-                ui.separator();
-                if menu(ui, "Turn into checklist", "", !self.session.viewing) {
-                    self.session.editor.set_checklist_for_selection();
-                    self.refocus = true;
-                }
-                if menu(ui, "Remove checklist", "", !self.session.viewing) {
-                    self.session.editor.paragraph_format(|p| {
-                        p.list = ListKind::None;
-                        p.checked = false;
+                egui::ScrollArea::vertical()
+                    .id_salt("canvas_context_commands")
+                    .max_height((ui.ctx().content_rect().height() - 32.0).max(160.0))
+                    .show(ui, |ui| {
+                        let (corrected, open_proof) = live_proofing::context_menu(
+                            ui,
+                            &mut self.live_proof,
+                            &mut self.session.editor,
+                            &mut self.prefs,
+                            &mut self.status,
+                            self.session.viewing,
+                        );
+                        if corrected {
+                            self.refocus = true;
+                            self.scroll_caret = true;
+                        }
+                        if open_proof {
+                            self.action = Some(Action::Proofing);
+                        }
+                        if matches!(
+                            self.session
+                                .editor
+                                .doc
+                                .blocks
+                                .get(self.session.editor.caret.address.block),
+                            Some(Block::Table(_))
+                        ) {
+                            if table_commands(ui, &mut self.session.editor, self.session.viewing) {
+                                self.refocus = true;
+                                self.scroll_caret = true;
+                            }
+                            if menu(
+                                ui,
+                                "Cell background and borders…",
+                                "",
+                                !self.session.viewing,
+                            ) {
+                                self.table_format_draft =
+                                    Some(table_controls::FormatDraft::new(&self.session.editor));
+                                self.dialog = Some(Dialog::TableFormat);
+                            }
+                            if menu(ui, "Formula…", "", !self.session.viewing) {
+                                self.table_format_draft =
+                                    Some(table_controls::FormatDraft::new(&self.session.editor));
+                                self.dialog = Some(Dialog::TableFormula);
+                            }
+                            if menu(ui, "Recalculate table", "", !self.session.viewing) {
+                                self.status = self
+                                    .session
+                                    .editor
+                                    .recalculate_table()
+                                    .map(|()| "Table calculations updated".into())
+                                    .unwrap_or_else(|e| e);
+                            }
+                            ui.separator();
+                        }
+                        if menu(
+                            ui,
+                            "Cut",
+                            "Ctrl+X",
+                            self.session.editor.selected() && !self.session.viewing,
+                        ) {
+                            self.action = Some(Action::Cut);
+                        }
+                        if menu(ui, "Copy", "Ctrl+C", self.session.editor.selected()) {
+                            self.action = Some(Action::Copy);
+                        }
+                        if menu(ui, "Paste", "Ctrl+V", !self.session.viewing) {
+                            self.action = Some(Action::Paste);
+                        }
+                        ui.separator();
+                        if menu(ui, "Turn into checklist", "", !self.session.viewing) {
+                            self.session.editor.set_checklist_for_selection();
+                            self.refocus = true;
+                        }
+                        if menu(ui, "Remove checklist", "", !self.session.viewing) {
+                            self.session.editor.paragraph_format(|p| {
+                                p.list = ListKind::None;
+                                p.checked = false;
+                            });
+                            self.refocus = true;
+                        }
+                        ui.separator();
+                        if menu(ui, "Insert link", "Ctrl+K", !self.session.viewing) {
+                            self.action = Some(Action::Link);
+                        }
+                        if menu(ui, "Page setup", "", !self.session.viewing) {
+                            self.action = Some(Action::Page);
+                        }
                     });
-                    self.refocus = true;
-                }
-                ui.separator();
-                if menu(ui, "Insert link", "Ctrl+K", !self.session.viewing) {
-                    self.action = Some(Action::Link);
-                }
-                if menu(ui, "Page setup", "", !self.session.viewing) {
-                    self.action = Some(Action::Page);
-                }
             });
         });
         if let Some(mut anchor) = gesture_anchor {
@@ -3206,8 +3352,13 @@ impl AlphaDocs {
                 ctx.request_repaint();
             }
             if action.options {
-                self.image_options_open = true;
-                self.comments_open = false;
+                if matches!(self.session.editor.doc.blocks.get(block),Some(Block::Image(i)) if i.editable.is_some())
+                {
+                    self.open_editable_object(None, Some(block));
+                } else {
+                    self.image_options_open = true;
+                    self.comments_open = false;
+                }
             }
             if let Some(flow) = action.flow
                 && !self.session.viewing
@@ -3403,7 +3554,11 @@ impl AlphaDocs {
             ctx.request_discard("Register document fonts");
             return;
         }
-        self.palette = theme::apply(&ctx, self.prefs.theme);
+        let next_palette = theme::apply(&ctx, self.prefs.theme);
+        if next_palette.dark != self.palette.dark {
+            self.textures.clear();
+        }
+        self.palette = next_palette;
         ui.painter()
             .rect_filled(ui.max_rect(), 0.0, self.palette.bg);
         ui.set_style(ctx.style_of(ctx.theme()));
@@ -3550,6 +3705,20 @@ impl eframe::App for AlphaDocs {
         self.persist_session();
         #[cfg(not(test))]
         let _ = persistence::save_preferences(&self.prefs);
+    }
+}
+
+fn paint_box(ui: &Ui, rect: Rect, style: BoxStyle, scale: f32) {
+    if let Some(fill) = style.fill {
+        ui.painter().rect_filled(rect, 0.0, layout::color(fill));
+    }
+    for (a, b, border) in layout::box_edges(rect, style) {
+        if border.width > 0.0 {
+            ui.painter().line_segment(
+                [a, b],
+                Stroke::new(border.width * scale, layout::color(border.colour)),
+            );
+        }
     }
 }
 

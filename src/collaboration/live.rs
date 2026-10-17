@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 use subtle::ConstantTimeEq;
-const ALPN: &[u8] = b"alphadocs/live/2";
+pub(super) const ALPN: &[u8] = b"alphadocs/live/3";
 const MAX_WIRE: usize = 48 * 1024 * 1024; // JSON encoding includes immutable binary assets.
 const TIMEOUT: Duration = Duration::from_secs(6);
 const INTERVAL: Duration = Duration::from_millis(250);
@@ -199,11 +199,13 @@ fn valid_presence(p: &Presence) -> bool {
         })
 }
 fn process(room: &mut Room, peer: String, request: Request, host_key: &str) -> Reply {
-    if request.version != 2
+    if request.version != 3
         || request.vector.len() > 64 * 1024
         || !valid_presence(&request.presence)
     {
-        return Reply::Invalid("Incompatible or invalid peer message".into());
+        return Reply::Invalid(
+            "Incompatible peer message. Update AlphaDocs on both devices".into(),
+        );
     }
     let access = room
         .grants
@@ -446,7 +448,7 @@ pub fn join(invite: Invite, name: String) -> Pending {
                 }
             };
             let initial = Request {
-                version: 2,
+                version: 3,
                 capability: invite.capability,
                 vector: vec![0],
                 update: vec![0, 0],
@@ -508,7 +510,7 @@ pub fn join(invite: Invite, name: String) -> Pending {
                 tokio::time::sleep(INTERVAL).await;
                 let outgoing = room.lock().ok().and_then(|r| {
                     Some(Request {
-                        version: 2,
+                        version: 3,
                         capability: invite.capability,
                         vector: r.replica.vector(),
                         update: if r.writable {
@@ -606,7 +608,7 @@ mod wire_tests {
         changed.title = "Forged".into();
         edit.commit(&changed).unwrap();
         let request = |capability, update| Request {
-            version: 2,
+            version: 3,
             capability,
             vector: vec![0],
             update,

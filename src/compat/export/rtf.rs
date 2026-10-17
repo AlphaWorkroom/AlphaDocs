@@ -121,10 +121,36 @@ impl Rtf {
                     number = 0;
                     for row in rows {
                         out.push_str("\\trowd\\trgaph108\\trleft0");
-                        for (i, _) in row.iter().enumerate() {
+                        for (i, cell) in row.iter().enumerate() {
+                            let style = cell.box_style.unwrap_or_default();
+                            if let Some(fill) = style.fill {
+                                let index = self
+                                    .colours
+                                    .iter()
+                                    .position(|c| *c == fill)
+                                    .map_or(0, |i| i + 1);
+                                let _ = write!(out, "\\clcbpat{index}");
+                            }
+                            for (edge, side) in style.borders.iter().zip(["t", "b", "l", "r"]) {
+                                let index = self
+                                    .colours
+                                    .iter()
+                                    .position(|c| *c == edge.colour)
+                                    .map_or(0, |i| i + 1);
+                                let _ = write!(
+                                    out,
+                                    "\\clbrdr{side}{}\\brdrw{}\\brdrcf{index}",
+                                    if edge.width == 0.0 {
+                                        "\\brdrnil"
+                                    } else {
+                                        "\\brdrs"
+                                    },
+                                    twips(edge.width)
+                                );
+                            }
                             let _ = write!(
                                 out,
-                                "\\clbrdrt\\brdrs\\brdrw10\\clbrdrl\\brdrs\\brdrw10\\clbrdrb\\brdrs\\brdrw10\\clbrdrr\\brdrs\\brdrw10\\cellx{}",
+                                "\\cellx{}",
                                 twips(width * (i + 1) as f32 / row.len().max(1) as f32)
                             );
                         }
@@ -186,6 +212,18 @@ pub(super) fn encode(doc: &Document) -> Result<Vec<u8>, String> {
         })
         .chain([&doc.page.header, &doc.page.footer])
     {
+        for colour in p
+            .box_style
+            .unwrap_or_default()
+            .borders
+            .iter()
+            .map(|b| b.colour)
+            .chain(p.box_style.and_then(|s| s.fill))
+        {
+            if !rtf.colours.contains(&colour) {
+                rtf.colours.push(colour);
+            }
+        }
         for s in std::iter::once(&p.style).chain(p.chars.iter().map(|c| &c.style)) {
             if !rtf.fonts.contains(&s.font) {
                 rtf.fonts.push(s.font.clone());

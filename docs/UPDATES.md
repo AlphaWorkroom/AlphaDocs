@@ -21,3 +21,6 @@ Staged downloads and `install.log` live under the AlphaDocs application-data `up
 The Windows/Linux/macOS download assets remain separate. GitHub native CI builds each platform, validates package content, and exercises isolated update replacement paths. Test-only verification modes require fresh temporary paths and suppress real relaunch, shortcuts/associations and authorization. These checks do not prove physical Mac UI/Gatekeeper approval or every Linux authorization configuration.
 
 Older 0.1.2 builds omitted native browser-link support and cannot receive this binary fix retroactively. Download and run the 0.1.3 installer once; later releases can use its built-in progress updater.
+
+
+Windows 0.1.6 additionally fixes update swaps started from an installed shortcut. The installer itself could inherit a working directory inside the installation and prevent `Directory.Move` even after AlphaDocs exited. New clients launch it from staging; the installer also resets its own working directory, covering updates started by older clients. Production `--verify-update` tests the actual wait/install path in a disposable directory, validates new/retained executables and skips user shortcuts, associations and GUI relaunch during verification.

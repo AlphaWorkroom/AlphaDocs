@@ -165,7 +165,26 @@ impl Odt {
                     for row in rows {
                         out.push_str("<table:table-row>");
                         for cell in row {
-                            out.push_str("<table:table-cell office:value-type=\"string\" table:style-name=\"Cell\">");
+                            let cell_name = self.next("Cell");
+                            let style = cell.box_style.unwrap_or_default();
+                            let mut properties = String::from("fo:padding=\"6pt\"");
+                            if let Some(fill) = style.fill {
+                                properties.push_str(&format!(
+                                    " fo:background-color=\"{}\"",
+                                    colour(fill)
+                                ));
+                            }
+                            for (edge, side) in
+                                style.borders.iter().zip(["top", "bottom", "left", "right"])
+                            {
+                                properties.push_str(&format!(
+                                    " fo:border-{side}=\"{}pt solid {}\"",
+                                    edge.width,
+                                    colour(edge.colour)
+                                ));
+                            }
+                            self.styles.push_str(&format!("<style:style style:name=\"{cell_name}\" style:family=\"table-cell\"><style:table-cell-properties {properties}/></style:style>"));
+                            out.push_str(&format!("<table:table-cell office:value-type=\"string\" table:style-name=\"{cell_name}\">"));
                             out.push_str(&self.paragraph(cell));
                             out.push_str("</table:table-cell>");
                         }

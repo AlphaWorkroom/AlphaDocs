@@ -2,12 +2,16 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use unicode_segmentation::UnicodeSegmentation;
 mod annotations;
+mod decoration;
+mod editable_object;
+pub use decoration::{BoxStyle, CellBorder};
+pub use editable_object::{EditableObject, ObjectSource, ShapeKind};
 mod shared;
 mod text_storage;
 pub use shared::SharedVec;
 mod paper;
 pub use paper::{LineNumbering, Paper};
-pub const DOCUMENT_VERSION: u32 = 10;
+pub const DOCUMENT_VERSION: u32 = 11;
 
 #[cfg(test)]
 mod storage_tests {
@@ -127,6 +131,8 @@ pub struct Paragraph {
     pub keep_together: bool,
     pub widow_control: bool,
     pub annotations: SharedVec<TextAnnotation>,
+    pub box_style: Option<BoxStyle>,
+    pub formula: Option<TableFormula>,
 }
 impl Default for Paragraph {
     fn default() -> Self {
@@ -147,6 +153,8 @@ impl Default for Paragraph {
             keep_together: false,
             widow_control: true,
             annotations: Default::default(),
+            box_style: None,
+            formula: None,
         }
     }
 }
@@ -221,7 +229,29 @@ impl Paragraph {
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TableFormula {
+    pub expression: String,
+    pub decimals: Option<u8>,
+    /// Unrecognised Word number masks are retained with the cached result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub word_number_format: Option<String>,
+}
+impl TableFormula {
+    pub fn valid(&self) -> bool {
+        !self.expression.trim().is_empty()
+            && self.expression.len() <= 4096
+            && self.expression.is_ascii()
+            && self.decimals.is_none_or(|d| d <= 8)
+            && self
+                .word_number_format
+                .as_ref()
+                .is_none_or(|mask| mask.len() <= 256 && !mask.contains(['"', '\r', '\n']))
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct EmbeddedImage {
+    #[serde(default)]
+    pub editable: Option<EditableObject>,
     #[serde(default = "new_object_id")]
     pub id: String,
     pub name: String,
@@ -263,6 +293,7 @@ pub fn new_object_id() -> String {
 impl Default for EmbeddedImage {
     fn default() -> Self {
         Self {
+            editable: None,
             id: new_object_id(),
             name: String::new(),
             data: Default::default(),
@@ -766,6 +797,12 @@ impl Document {
                     return Err("Invalid text annotation anchor or thread".into());
                 }
             }
+            if p.box_style.is_some_and(|style| !style.valid()) {
+                return Err("Invalid paragraph or table border width".into());
+            }
+            if p.formula.as_ref().is_some_and(|formula| !formula.valid()) {
+                return Err("Invalid table formula".into());
+            }
             if !p.line_spacing.is_finite()
                 || !(0.5..=5.0).contains(&p.line_spacing)
                 || !p.indent.is_finite()
@@ -787,6 +824,9 @@ impl Document {
         let mut image_ids = std::collections::HashSet::new();
         for b in &self.blocks {
             if let Block::Image(i) = b {
+                if let Some(object) = &i.editable {
+                    crate::editable_objects::validate(object)?;
+                }
                 if i.id.is_empty() || !image_ids.insert(&i.id) {
                     return Err("Invalid or duplicate image identifier".into());
                 }

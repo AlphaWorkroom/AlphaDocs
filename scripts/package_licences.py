@@ -3,6 +3,7 @@ import json
 import pathlib
 import shutil
 import sys
+import zipfile
 
 root = pathlib.Path(__file__).resolve().parent.parent
 metadata = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8-sig"))
@@ -41,7 +42,19 @@ for package in sorted(metadata["packages"], key=lambda p: (p["name"], p["version
             raise RuntimeError("Missing source archive: " + tag)
         shutil.copyfile(archive, sources / archive.name)
         archives.append(tag)
-    notices.append(f"- {tag}: {package.get('license') or 'See original licence file'}. Source: https://crates.io/crates/{package['name']}/{package['version']}")
+    source_url = f"https://crates.io/crates/{package['name']}/{package['version']}"
+    if package["source"].startswith("git+"):
+        repository, revision = package["source"][4:].split("#", 1)
+        source_url = repository.split("?", 1)[0] + "/tree/" + revision
+        if package["name"] == "mathema":
+            # Preserve the exact pinned parser/rendering source and original
+            # Latin Modern font files alongside their separate GUST/LPPL terms.
+            with zipfile.ZipFile(sources / "mathema-pinned-source.zip", "w", zipfile.ZIP_DEFLATED) as bundle:
+                for item in sorted(source.rglob("*")):
+                    relative = item.relative_to(source)
+                    if item.is_file() and (relative.parts[0] == "src" or relative.as_posix() in ("Cargo.toml", "README.md", "LICENSE")):
+                        bundle.write(item, item.relative_to(source).as_posix())
+    notices.append(f"- {tag}: {package.get('license') or 'See original licence file'}. Source: {source_url}")
 notices.extend(["", "Unmodified published Cargo source archives for MPL components and crates without a standalone notice are in third-party-sources (.crate is gzip-compressed tar). AlphaDocs's modified egui-winit source is in the repository's vendor directory.", ""])
 (root / "dist" / "THIRD-PARTY-NOTICES.md").write_text("\n".join(notices), encoding="utf-8")
 print(f"Bundled notices for {len(metadata['packages'])} resolved packages; {len(archives)} source archives. {len(missing)} packages use their full source archive as the original notice source.")

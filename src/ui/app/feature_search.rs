@@ -18,6 +18,41 @@ fn commands() -> Vec<(&'static str, &'static str, Command)> {
     use Command::Action as A;
     vec![
         (
+            "Insert equation",
+            "Insert · Editable LaTeX and Word math",
+            A(Action::Object(None)),
+        ),
+        (
+            "Insert text box",
+            "Insert · Editable drawing",
+            A(Action::Object(Some(ShapeKind::TextBox))),
+        ),
+        (
+            "Insert rectangle",
+            "Insert · Basic shape",
+            A(Action::Object(Some(ShapeKind::Rectangle))),
+        ),
+        (
+            "Insert ellipse",
+            "Insert · Basic shape",
+            A(Action::Object(Some(ShapeKind::Ellipse))),
+        ),
+        (
+            "Insert arrow shape",
+            "Insert · Basic shape",
+            A(Action::Object(Some(ShapeKind::Arrow))),
+        ),
+        (
+            "Cell background and borders",
+            "Table · Select a cell, row or column",
+            A(Action::CellFormat),
+        ),
+        (
+            "Table formula",
+            "Table · Calculations in the current cell",
+            A(Action::CellFormula),
+        ),
+        (
             "Compare documents",
             "Tools · Local text comparison",
             A(Action::Tool(tools::Tool::Compare)),
