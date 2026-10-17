@@ -262,7 +262,7 @@ impl Writer {
         if p.keep_next {
             x.push_str("<w:keepNext/>");
         }
-        if p.list != ListKind::None {
+        if matches!(p.list, ListKind::Bullet | ListKind::Number) {
             x.push_str(&format!(
                 "<w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"{}\"/></w:numPr>",
                 if p.list == ListKind::Number { 2 } else { 1 }
@@ -270,6 +270,15 @@ impl Writer {
         }
         x.push_str(&rpr(&p.style));
         x.push_str("</w:pPr>");
+        if p.list == ListKind::Check {
+            // A standard Word 2010 checkbox content control, not private state
+            // or a bullet alias. Its visible content must be exactly one glyph.
+            self.counter += 1;
+            x.push_str(&format!(
+                "<w:sdt xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" mc:Ignorable=\"w14\"><w:sdtPr><w:id w:val=\"{}\"/><w14:checkbox><w14:checked w14:val=\"{}\"/><w14:checkedState w14:val=\"2611\" w14:font=\"Segoe UI Symbol\"/><w14:uncheckedState w14:val=\"2610\" w14:font=\"Segoe UI Symbol\"/></w14:checkbox></w:sdtPr><w:sdtContent><w:r><w:rPr><w:rFonts w:ascii=\"Segoe UI Symbol\" w:hAnsi=\"Segoe UI Symbol\"/></w:rPr><w:t>{}</w:t></w:r></w:sdtContent></w:sdt><w:r><w:t xml:space=\"preserve\"> </w:t></w:r>",
+                self.counter, u8::from(p.checked), if p.checked { '☑' } else { '☐' }
+            ));
+        }
         let mut start = 0;
         while start < p.chars.len() {
             let s = &p.chars[start].style;
@@ -440,7 +449,7 @@ pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
         );
     }
     let header = format!(
-        "<w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">{}</w:hdr>",
+        "<w:hdr xmlns:alphadocs=\"urn:alphadocs:image:v1\" xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" mc:Ignorable=\"alphadocs\" xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">{}</w:hdr>",
         writer.paragraph(&doc.page.header)
     );
     let mut footer_text = writer.paragraph(&doc.page.footer);
@@ -492,7 +501,7 @@ pub fn export(doc: &Document, path: &Path) -> Result<(), String> {
         footer_text.push_str(field);
     }
     let footer = format!(
-        "<w:ftr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">{footer_text}</w:ftr>"
+        "<w:ftr xmlns:alphadocs=\"urn:alphadocs:image:v1\" xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" mc:Ignorable=\"alphadocs\" xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">{footer_text}</w:ftr>"
     );
     let types=types.replace("</Types>","<Override PartName=\"/word/header1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/></Types>");
     let core = format!(
@@ -705,6 +714,7 @@ fn collect_runs(
     rels: &HashMap<String, String>,
     styles: &Styles,
     link: Option<String>,
+    check_separator: &mut bool,
 ) {
     for child in &n.children {
         match child.name.as_str() {
@@ -714,10 +724,38 @@ fn collect_runs(
                 rels,
                 styles,
                 child.attr("id").and_then(|id| rels.get(id)).cloned(),
+                check_separator,
             ),
             "sdt" => {
+                if p.chars.is_empty()
+                    && p.list != ListKind::Check
+                    && child.child("sdtContent").is_some_and(|content| {
+                        content.children.iter().all(|run| {
+                            run.name == "r"
+                                && run
+                                    .children
+                                    .iter()
+                                    .all(|node| matches!(node.name.as_str(), "rPr" | "t"))
+                        }) && content
+                            .children
+                            .iter()
+                            .filter(|run| run.name == "r")
+                            .flat_map(|run| &run.children)
+                            .filter(|node| node.name == "t")
+                            .flat_map(|node| node.text.chars())
+                            .take(2)
+                            .count()
+                            == 1
+                    })
+                    && let Some(checkbox) = child.child("sdtPr").and_then(|pr| pr.child("checkbox"))
+                {
+                    p.list = ListKind::Check;
+                    p.checked = checkbox.child("checked").is_some() && on(checkbox, "checked");
+                    *check_separator = true;
+                    continue;
+                }
                 if let Some(content) = child.child("sdtContent") {
-                    collect_runs(content, p, rels, styles, link.clone());
+                    collect_runs(content, p, rels, styles, link.clone(), check_separator);
                 }
             }
             "r" => {
@@ -736,12 +774,20 @@ fn collect_runs(
                     s.link = link.clone();
                 }
                 for t in &child.children {
-                    let text = match t.name.as_str() {
+                    let mut text = match t.name.as_str() {
                         "t" => t.text.clone(),
                         "tab" => "\t".into(),
                         "br" | "cr" if t.attr("type") != Some("page") => "\n".into(),
                         _ => String::new(),
                     };
+                    if *check_separator && !text.is_empty() {
+                        // Remove only the single layout separator after the
+                        // control, preserving the task's own leading spaces.
+                        if text.starts_with([' ', '\t']) {
+                            text.remove(0);
+                        }
+                        *check_separator = false;
+                    }
                     p.chars.extend(text.chars().map(|ch| StyledChar {
                         ch,
                         style: s.clone(),
@@ -800,7 +846,7 @@ fn paragraph(
     if let Some(pr) = n.child("pPr") {
         styles.properties(&mut p, pr, numbering);
     }
-    collect_runs(n, &mut p, rels, styles, None);
+    collect_runs(n, &mut p, rels, styles, None, &mut false);
     if !p.annotations.is_empty() && n.attr("annotationText") != Some(p.text().as_str()) {
         for note in &mut p.annotations {
             note.start = 0;
@@ -1406,6 +1452,89 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checklist_word_controls_preserve_states_text_styles_and_all_tabs() {
+        let task = |checked| {
+            let mut paragraph = Paragraph::from_text("  Keep the original spacing α");
+            paragraph.list = ListKind::Check;
+            paragraph.checked = checked;
+            paragraph.chars[4].style.bold = true;
+            paragraph
+        };
+        let mut editor = crate::engine::Editor::new(Document::new("Word checklist"));
+        editor.doc.blocks = vec![
+            Block::Paragraph(task(false)),
+            Block::Table(vec![vec![task(true)]]),
+        ];
+        editor.add_tab();
+        editor.doc.blocks = vec![Block::Paragraph(task(true))];
+        editor.switch_tab(0);
+        editor.doc.page.header = task(false);
+        editor.doc.page.footer = task(true);
+        let before = editor.doc.clone();
+        let path = std::env::temp_dir().join(format!("alphadocs-checklist-{}.docx", before.id));
+        export(&before, &path).unwrap();
+        let (loaded, warnings) = import(&path).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        for index in 0..2 {
+            assert_eq!(loaded.tab_blocks(index), before.tab_blocks(index));
+        }
+        assert_eq!(editor.doc, before);
+        assert_eq!(loaded.page.header, before.page.header);
+        assert_eq!(loaded.page.footer, before.page.footer);
+        let mut zip = ZipArchive::new(File::open(&path).unwrap()).unwrap();
+        let mut xml = String::new();
+        zip.by_name("word/document.xml")
+            .unwrap()
+            .read_to_string(&mut xml)
+            .unwrap();
+        assert_eq!(xml.matches("<w14:checkbox>").count(), 3);
+        assert_eq!(xml.matches("<w14:checked w14:val=\"1\"").count(), 2);
+        assert!(
+            !xml.contains("<w:numPr>"),
+            "Checkboxes must not degrade to bullets"
+        );
+        drop(zip);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn imported_checkbox_state_is_standard_word_state_not_private_metadata_or_display_glyph() {
+        for checked in [false, true] {
+            let xml = format!(
+                "<p><sdt><sdtPr><checkbox><checked val=\"{}\"/></checkbox></sdtPr><sdtContent><r><t>☐</t></r></sdtContent></sdt><r><t> </t></r><r><t>  Task α</t></r></p>",
+                u8::from(checked)
+            );
+            let root = parse(&xml).unwrap();
+            let p = paragraph(
+                root.child("p").unwrap(),
+                &HashMap::new(),
+                &Styles::default(),
+                &HashMap::new(),
+            );
+            assert_eq!(p.list, ListKind::Check);
+            assert_eq!(p.checked, checked);
+            assert_eq!(p.text(), "  Task α");
+        }
+        // An inline or malformed multi-character control must retain its text.
+        for (prefix, content, expected) in [
+            ("Before ", "☑", "Before ☑ after"),
+            ("", "Keep me", "Keep me after"),
+        ] {
+            let xml = format!(
+                "<p><r><t>{prefix}</t></r><sdt><sdtPr><checkbox/></sdtPr><sdtContent><r><t>{content}</t></r></sdtContent></sdt><r><t> after</t></r></p>"
+            );
+            let root = parse(&xml).unwrap();
+            let p = paragraph(
+                root.child("p").unwrap(),
+                &HashMap::new(),
+                &Styles::default(),
+                &HashMap::new(),
+            );
+            assert_eq!(p.list, ListKind::None);
+            assert_eq!(p.text(), expected);
+        }
+    }
     #[test]
     fn defaults_style_ancestry_and_partial_overrides_preserve_word_metrics() {
         let xml=parse(r#"<styles><docDefaults><rPrDefault><rPr><rFonts ascii="Arial"/><sz val="22"/></rPr></rPrDefault><pPrDefault><pPr><spacing line="276" lineRule="auto"/></pPr></pPrDefault></docDefaults><style styleId="Normal"><pPr><spacing after="120"/></pPr></style><style styleId="Chapter"><basedOn val="Normal"/><name val="heading 2"/><pPr><keepNext/><spacing before="240"/></pPr><rPr><sz val="32"/><b/></rPr></style><style styleId="Emphasis"><rPr><i/></rPr></style></styles>"#).unwrap();
