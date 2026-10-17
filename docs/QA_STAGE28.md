@@ -4,7 +4,7 @@
 
 ## Automated evidence
 
-- Full Rust all-target/all-feature suite: 271 library, 3 speech-worker and 3 independent integration tests passed; all four explicit diagnostics also passed (281 active checks in total). No real microphone, system clipboard, user profile or physical printer was used.
+- Full Rust all-target/all-feature suite: 271 library, 3 speech-worker and 4 independent integration tests passed; all four explicit diagnostics also passed (282 active checks in total). No real microphone, system clipboard, user profile or physical printer was used.
 - Strict Clippy all targets/all features and rustfmt passed after the final source refinements.
 - Complete DOCX package validation: Microsoft Open XML SDK 3.0.1, Office 2010 schema, zero errors (`qa/stage28/openxml-delivery.log`). Includes story text with paragraph borders, cell fills/edges, a real Word formula field, Office Math and five WPS object geometries.
 - DOCX/native source regressions preserve Unicode text/styles, stable object IDs, formulas, original media, resizing and Undo. Full UI frames exercise palette removal, row shading preserving distinct edges, source-dialog Insert/Edit/Cancel, stale/read-only guards and small 960×640 layouts in both themes.

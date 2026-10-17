@@ -110,3 +110,30 @@ fn drawing_text_edits_preserve_unchanged_rich_runs_and_soft_newlines() {
     assert!(edited.chars.iter().rev().take(6).all(|c| c.style.italic));
     assert_eq!(paragraph.text(), "Bold café 👩🏽‍💻 ending");
 }
+
+#[test]
+fn shorthand_table_input_is_stored_as_a_standard_word_formula_instruction() {
+    let mut editor = engine::Editor::new(Document::new("Formula input"));
+    editor.insert_table(1, 1);
+    editor
+        .set_table_formula(TableFormula {
+            expression: " 2+3 ".into(),
+            decimals: None,
+            word_number_format: None,
+        })
+        .unwrap();
+    let paragraph = editor.doc.paragraph(editor.caret.address).unwrap();
+    assert_eq!(paragraph.text(), "5");
+    assert_eq!(paragraph.formula.as_ref().unwrap().expression, "=2+3");
+    let original = editor.doc.clone();
+    assert!(
+        editor
+            .set_table_formula(TableFormula {
+                expression: "=2+3".into(),
+                decimals: None,
+                word_number_format: Some("$0".into()),
+            })
+            .is_err()
+    );
+    assert_eq!(editor.doc, original);
+}

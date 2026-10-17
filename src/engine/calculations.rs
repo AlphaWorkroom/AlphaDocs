@@ -59,7 +59,7 @@ pub fn edit_drawing_text(paragraph: &Paragraph, new_text: &str) -> Paragraph {
     editor.doc.paragraph(Address::default()).unwrap().clone()
 }
 impl Editor {
-    pub fn set_table_formula(&mut self, formula: TableFormula) -> Result<(), String> {
+    pub fn set_table_formula(&mut self, mut formula: TableFormula) -> Result<(), String> {
         if !self.collaboration_writable() {
             return Err("This document is read-only".into());
         }
@@ -67,7 +67,13 @@ impl Editor {
         let Some(Block::Table(rows)) = self.doc.blocks.get(at.block) else {
             return Err("Select a table cell first".into());
         };
-        if !formula.valid() {
+        // Accept convenient native input, but store a real Word formula field
+        // instruction so export/recalculation never turns it into an unknown field.
+        formula.expression = formula.expression.trim().to_owned();
+        if !formula.expression.starts_with('=') {
+            formula.expression.insert(0, '=');
+        }
+        if !formula.valid() || formula.word_number_format.is_some() {
             return Err("Invalid table formula or number format".into());
         }
         let result = crate::table_formula::evaluate(rows, at.row, at.cell, &formula.expression)?;
