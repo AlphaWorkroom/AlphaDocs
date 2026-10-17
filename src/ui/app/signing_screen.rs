@@ -46,6 +46,7 @@ struct Answer {
     text: String,
     drawn: bool,
     strokes: Vec<SignatureStroke>,
+    active_stroke: Option<usize>,
 }
 
 impl AlphaDocs {
@@ -140,8 +141,8 @@ impl AlphaDocs {
                                 ui.label(RichText::new("Required fields").size(12.0).color(p.muted));
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label("Signature · Date signed");
-                                    ui.checkbox(&mut draft.name_field,"Name");
-                                    ui.checkbox(&mut draft.initials,"Initials");
+                                    form_checkbox(ui,&mut draft.name_field,"Name",p);
+                                    form_checkbox(ui,&mut draft.initials,"Initials",p);
                                 });
                                 text_field(ui,&mut draft.note,"Optional additional text field, e.g. Job title",p);
                             }
@@ -454,13 +455,16 @@ impl SigningUi {
                 });
             }
             ui.add_space(16.0);
-            let r = ui.add_enabled(
-                self.review.is_none(),
-                egui::Checkbox::new(
-                    &mut self.consent,
-                    format!("I am {} and intend to sign this document.", signer.name),
-                ),
-            );
+            let r = ui
+                .add_enabled_ui(self.review.is_none(), |ui| {
+                    form_checkbox(
+                        ui,
+                        &mut self.consent,
+                        &format!("I am {} and intend to sign this document.", signer.name),
+                        p,
+                    )
+                })
+                .inner;
             tools::bounds(ui, "signing_consent", &r);
             ui.add_space(12.0);
             if let Some(response) = self.review.clone() {
@@ -696,14 +700,48 @@ fn signature_pad(ui: &mut Ui, answer: &mut Answer, p: Palette) {
         ],
         Stroke::new(1.0, p.border),
     );
-    if (response.drag_started() || response.is_pointer_button_down_on())
-        && let Some(point) = response.interact_pointer_pos()
-    {
-        if (response.drag_started() || answer.strokes.is_empty()) && answer.strokes.len() < 64 {
-            answer.strokes.push(SignatureStroke { points: Vec::new() });
-        }
+    let events = if ui.is_enabled() {
+        ui.input(|i| i.events.clone())
+    } else {
+        answer.active_stroke = None;
+        Vec::new()
+    };
+    for event in events {
+        let point = match event {
+            Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                ..
+            } if rect.contains(pos)
+                && ui.clip_rect().contains(pos)
+                && ui
+                    .ctx()
+                    .layer_id_at(pos)
+                    .is_none_or(|layer| layer == ui.layer_id()) =>
+            {
+                answer.active_stroke = if answer.strokes.len() < 64 {
+                    answer.strokes.push(SignatureStroke { points: Vec::new() });
+                    Some(answer.strokes.len() - 1)
+                } else {
+                    None
+                };
+                Some(pos)
+            }
+            Event::PointerMoved(pos) if answer.active_stroke.is_some() => Some(pos),
+            Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                ..
+            } => Some(pos),
+            _ => None,
+        };
         let total = answer.strokes.iter().map(|s| s.points.len()).sum::<usize>();
-        if let Some(stroke) = answer.strokes.last_mut() {
+        if let Some(point) = point
+            && let Some(index) = answer.active_stroke
+            && let Some(stroke) = answer.strokes.get_mut(index)
+        {
             let point = Point {
                 x: ((point.x - rect.left()) / rect.width()).clamp(0.0, 1.0),
                 y: ((point.y - rect.top()) / rect.height()).clamp(0.0, 1.0),
@@ -717,7 +755,16 @@ fn signature_pad(ui: &mut Ui, answer: &mut Answer, p: Palette) {
                 stroke.points.push(point);
             }
         }
-        ui.ctx().request_repaint();
+        if matches!(
+            event,
+            Event::PointerButton {
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                ..
+            }
+        ) {
+            answer.active_stroke = None;
+        }
     }
     for stroke in &answer.strokes {
         for pair in stroke.points.windows(2) {
@@ -738,6 +785,7 @@ fn signature_pad(ui: &mut Ui, answer: &mut Answer, p: Palette) {
     }
     if ui.small_button("Clear drawing").clicked() {
         answer.strokes.clear();
+        answer.active_stroke = None;
     }
 }
 fn draw_signature(ui: &mut Ui, strokes: &[SignatureStroke], p: Palette) {
@@ -769,6 +817,22 @@ fn text_field(ui: &mut Ui, value: &mut String, hint: &str, p: Palette) -> egui::
             )
         })
         .inner
+}
+
+fn form_checkbox(ui: &mut Ui, value: &mut bool, label: &str, p: Palette) -> egui::Response {
+    ui.scope(|ui| {
+        let widgets = &mut ui.style_mut().visuals.widgets;
+        for visual in [
+            &mut widgets.inactive,
+            &mut widgets.hovered,
+            &mut widgets.active,
+        ] {
+            visual.corner_radius = egui::CornerRadius::same(3);
+            visual.bg_stroke = Stroke::new(1.0, p.border);
+        }
+        ui.checkbox(value, label)
+    })
+    .inner
 }
 
 #[cfg(test)]
@@ -995,5 +1059,88 @@ mod tests {
         );
         assert_eq!(app.signing.answers["signature-1"].text, "Alex Example");
         assert_eq!(app.signing.review.as_ref().unwrap(), &response);
+    }
+
+    #[test]
+    fn drawing_keeps_first_points_and_separate_coalesced_strokes_without_editing_document() {
+        let ctx = Context::default();
+        let mut app = app_with_request(&ctx);
+        let original = app.session.editor.doc.clone();
+        app.signing
+            .answers
+            .entry("signature-1".into())
+            .or_default()
+            .drawn = true;
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        let pad = ctx
+            .data(|d| d.get_temp::<Rect>(Id::new("signing_draw_pad")))
+            .unwrap();
+        let a = pad.min + vec2(20.0, 20.0);
+        let b = a + vec2(45.0, 25.0);
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &ctx,
+            &mut app,
+            vec![Event::PointerMoved(a), button(a, true)],
+        );
+        frame(&ctx, &mut app, vec![Event::PointerMoved(b)]);
+        frame(&ctx, &mut app, vec![button(b, false)]);
+        let c = a + vec2(85.0, 0.0);
+        let d = c + vec2(25.0, 30.0);
+        frame(
+            &ctx,
+            &mut app,
+            vec![
+                Event::PointerMoved(c),
+                button(c, true),
+                Event::PointerMoved(d),
+                button(d, false),
+            ],
+        );
+        let answer = &app.signing.answers["signature-1"];
+        assert_eq!(answer.strokes.len(), 2);
+        assert!(answer.strokes.iter().all(|s| s.points.len() == 2));
+        assert!((answer.strokes[0].points[0].x - 20.0 / pad.width()).abs() < 0.001);
+        assert!(answer.active_stroke.is_none());
+        assert_eq!(app.session.editor.doc, original);
+        let before = app.signing.answers["signature-1"].strokes.clone();
+        let request = app.signing.request.as_ref().unwrap();
+        app.signing.review = Some(
+            SignerResponse::complete(
+                request,
+                &request.signers[0].id,
+                BTreeMap::from([(
+                    "signature-1".into(),
+                    FieldValue::DrawnSignature(before.clone()),
+                )]),
+            )
+            .unwrap(),
+        );
+        for _ in 0..2 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        let pad = ctx
+            .data(|d| d.get_temp::<Rect>(Id::new("signing_draw_pad")))
+            .unwrap();
+        let a = pad.center();
+        let b = a + vec2(20.0, 20.0);
+        frame(
+            &ctx,
+            &mut app,
+            vec![
+                Event::PointerMoved(a),
+                button(a, true),
+                Event::PointerMoved(b),
+                button(b, false),
+            ],
+        );
+        assert_eq!(app.signing.answers["signature-1"].strokes, before);
     }
 }

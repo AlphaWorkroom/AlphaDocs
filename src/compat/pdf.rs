@@ -64,6 +64,38 @@ fn fill(ops: &mut Vec<Op>, rect: eframe::egui::Rect, h: f32, c: [u8; 3]) {
         },
     });
 }
+
+/// Checklists use document-coloured vectors, independent of font glyph coverage
+/// and the application's light/dark palette. Geometry matches the canvas marker.
+fn checklist_marker(
+    ops: &mut Vec<Op>,
+    rect: eframe::egui::Rect,
+    h: f32,
+    checked: bool,
+    color: [u8; 3],
+) {
+    use eframe::egui::{Rect, pos2, vec2};
+    let center = pos2(rect.left() - 11.0, rect.center().y);
+    let square = Rect::from_center_size(center, vec2(15.0, 15.0));
+    ops.push(Op::SaveGraphicsState);
+    stroke(ops, square, h, color, true);
+    if checked {
+        ops.push(Op::SetOutlineThickness { pt: Pt(1.7) });
+        ops.push(Op::DrawLine {
+            line: Line {
+                points: [vec2(-4.0, 0.0), vec2(-1.0, 3.0), vec2(4.5, -3.5)]
+                    .into_iter()
+                    .map(|offset| LinePoint {
+                        p: point(center.x + offset.x, h - center.y - offset.y),
+                        bezier: false,
+                    })
+                    .collect(),
+                is_closed: false,
+            },
+        });
+    }
+    ops.push(Op::RestoreGraphicsState);
+}
 pub fn export(doc: &Document, layout: &Layout, path: &Path) -> Result<(), String> {
     persistence::atomic_write(path, &encode(doc, layout)?)
 }
@@ -225,23 +257,27 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                 .ok_or("Invalid paragraph in layout")?;
             let glyphs = &line.row.glyphs;
             if let Some(marker) = &line.marker {
-                ops.extend([
-                    Op::StartTextSection,
-                    Op::SetFont {
-                        font: PdfFontHandle::External(ids[&default_key].clone()),
-                        size: Pt(p.style.size),
-                    },
-                    Op::SetTextCursor {
-                        pos: point(line.rect.left() - 18.0, h - line.rect.top() - p.style.size),
-                    },
-                    Op::SetFillColor {
-                        col: rgb(p.style.color),
-                    },
-                    Op::ShowText {
-                        items: vec![TextItem::Text(marker.clone())],
-                    },
-                    Op::EndTextSection,
-                ]);
+                if marker == "☐" || marker == "☑" {
+                    checklist_marker(&mut ops, line.rect, h, p.checked, p.style.color);
+                } else {
+                    ops.extend([
+                        Op::StartTextSection,
+                        Op::SetFont {
+                            font: PdfFontHandle::External(ids[&default_key].clone()),
+                            size: Pt(p.style.size),
+                        },
+                        Op::SetTextCursor {
+                            pos: point(line.rect.left() - 18.0, h - line.rect.top() - p.style.size),
+                        },
+                        Op::SetFillColor {
+                            col: rgb(p.style.color),
+                        },
+                        Op::ShowText {
+                            items: vec![TextItem::Text(marker.clone())],
+                        },
+                        Op::EndTextSection,
+                    ]);
+                }
             }
             let mut start = line.start;
             while start < line.end {
@@ -391,6 +427,60 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checklist_pdf_uses_vectors_for_both_states_without_missing_font_glyphs() {
+        let mut doc = Document::new("Checklist PDF");
+        doc.blocks = [false, true]
+            .into_iter()
+            .map(|checked| {
+                let mut paragraph = Paragraph::from_text(if checked { "Done" } else { "Todo" });
+                paragraph.list = ListKind::Check;
+                paragraph.checked = checked;
+                Block::Paragraph(paragraph)
+            })
+            .collect();
+        let before = doc.clone();
+        let ctx = eframe::egui::Context::default();
+        fonts::install(&ctx);
+        let mut bytes = Vec::new();
+        let mut output = ctx.run_ui(Default::default(), |_| {
+            bytes = encode(&doc, &Layout::measure(&ctx, &doc)).unwrap();
+        });
+        output.textures_delta.clear();
+        let parsed =
+            PdfDocument::parse(&bytes, &PdfParseOptions::default(), &mut Vec::new()).unwrap();
+        let lines: Vec<_> = parsed.pages[0]
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::DrawLine { line } => Some(line),
+                _ => None,
+            })
+            .collect();
+        // The PDF parser represents closed stroked paths as polygons.
+        assert_eq!(
+            parsed.pages[0]
+                .ops
+                .iter()
+                .filter(|op| matches!(op,
+                    Op::DrawPolygon { polygon } if polygon.mode == PaintMode::Stroke
+                        && polygon.rings.len() == 1 && polygon.rings[0].points.len() >= 4
+                ))
+                .count(),
+            2
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| !line.is_closed && line.points.len() == 3)
+                .count(),
+            1
+        );
+        let text = parsed.pages[0].extract_text(&parsed.resources).join("");
+        assert!(text.contains("Todo") && text.contains("Done"), "{text:?}");
+        assert!(!text.contains(['☐', '☑', '\u{fffd}']));
+        assert_eq!(doc, before);
+    }
     #[test]
     fn pdf_symbol_fallback_preserves_unicode() {
         let mut doc = Document::new("PDF symbols");

@@ -306,23 +306,29 @@ impl AlphaDocs {
         ui.add_space(20.0);
         let mut apply = None;
         let mut pin = None;
-        ui.with_layout(UiLayout::right_to_left(Align::Center), |ui| {
-            if primary(ui, "Apply", p, !self.session.viewing && state.valid()).clicked()
-                && !self.session.viewing
-                && state.valid()
-            {
-                apply = Some((state.colour, state.highlight));
-                *close = true;
-            }
-            if ui
-                .add(egui::Button::new("Pin colour").stroke(Stroke::new(1.0, p.accent)))
-                .clicked()
-            {
-                pin = Some(state.colour);
-            }
-            if ui.button("Cancel").clicked() {
-                *close = true;
-            }
+        ui.horizontal(|ui| {
+            ui.with_layout(UiLayout::right_to_left(Align::Center), |ui| {
+                if primary(ui, "Apply", p, !self.session.viewing && state.valid()).clicked()
+                    && !self.session.viewing
+                    && state.valid()
+                {
+                    apply = Some((state.colour, state.highlight));
+                    *close = true;
+                }
+                if ui
+                    .add(egui::Button::new("Pin colour").stroke(Stroke::new(1.0, p.accent)))
+                    .clicked()
+                {
+                    pin = Some(state.colour);
+                }
+                if ui.button("Cancel").clicked() {
+                    *close = true;
+                }
+            });
+        });
+        #[cfg(test)]
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(Id::new("colour_picker_content_rect"), ui.min_rect())
         });
         if let Some((colour, highlight)) = apply {
             self.apply_colour(colour, highlight);
@@ -625,6 +631,14 @@ mod tests {
             frame(&ctx, &mut app, vec![]);
         }
         let wheel = ctx.read_response(Id::new("colour_wheel")).unwrap().rect;
+        let content = ctx
+            .data(|data| data.get_temp::<Rect>(Id::new("colour_picker_content_rect")))
+            .unwrap();
+        assert!(
+            content.height() < 420.0,
+            "Picker must fit its controls without a stretched empty footer: {content:?}"
+        );
+        assert!(content.bottom() - wheel.bottom() < 170.0);
         let angle = 240_f32.to_radians();
         let start = wheel.center() + vec2(angle.cos(), angle.sin()) * (wheel.width() * 0.2);
         let point = wheel.center() + vec2(angle.cos(), angle.sin()) * (wheel.width() * 0.48);
