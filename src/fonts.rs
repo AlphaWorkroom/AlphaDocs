@@ -188,14 +188,27 @@ pub fn symbol_key(s: &TextStyle, ch: char) -> String {
         })
         .clone()
 }
+/// Resolve a complete emoji grapheme so ZWJ and modifier sequences stay in one
+/// shaping run. The ordinary body face often has no glyph for these sequences.
+pub fn emoji_fallback_key(s: &TextStyle, text: &str) -> Option<&'static str> {
+    if emojis::get(text).is_some() && (text.chars().nth(1).is_some() || !has_glyphs(&face(s), text))
+    {
+        Some("Emoji")
+    } else {
+        None
+    }
+}
 fn has_glyph(data: &FontData, ch: char) -> bool {
+    has_glyphs(data, ch.encode_utf8(&mut [0; 4]))
+}
+fn has_glyphs(data: &FontData, text: &str) -> bool {
     let Ok(font) = harfrust::FontRef::from_index(data.font.as_ref(), data.index) else {
         return false;
     };
     let data = harfrust::ShaperData::new(&font);
     let shaper = data.shaper(&font).build();
     let mut buffer = harfrust::UnicodeBuffer::new();
-    buffer.push_str(ch.encode_utf8(&mut [0; 4]));
+    buffer.push_str(text);
     buffer.guess_segment_properties();
     let glyphs = shaper
         .shape(buffer, harfrust::ShapeOptions::new())

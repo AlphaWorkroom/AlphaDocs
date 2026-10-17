@@ -13,6 +13,9 @@ This pass uses synthetic documents and an isolated AlphaDocs profile. It does no
 | Invalid colour entry followed by Pin | Disable pinning for invalid input, duplicates and full palettes; retain document/selection. Native wheel, brightness, pin, Apply and Undo were exercised in Dark mode. |
 | Signature stroke interrupted by leaving the window/focus | End the active stroke, retaining points already drawn. Returning without a fresh press adds no connecting line. Full signing workspace frames verify both interruption events and reviewed/disabled input. |
 | Empty homepage with autosave disabled | Show the actual preference instead of claiming autosave is enabled. |
+| Body emoji exported as empty squares | Select the bundled fallback per complete emoji grapheme; keep joined/modifier sequences together and remove hidden selector glyphs after shaping. PDF extraction checks single, joined, skin-tone, variation-selector and flag emoji. |
+| Closely spaced checklist markers and click targets | Keep each hit region within its measured line; share size constraints between canvas and PDF so adjacent marks stay separate. Full Light/Dark frames check nonoverlapping targets, toggle and Undo. |
+| Missing/invalid file opened from Documents | Show the existing message dialog instead of a hidden status line. Frame tests retain current content, caret and Undo, and preserve malformed source bytes. |
 
 ## Verification scenarios
 
@@ -24,7 +27,7 @@ Local logs, original fixtures, before/after failure logs and native screenshots 
 
 The first exact-release run caught a separate PDF/DOCX command path still revealing the caret after export. Release publication was stopped. The post-command frame regression now covers both original export commands and every newer format; native PDF export is repeated on the corrected final executable.
 
-Local final source result: 257 library tests and 3 speech-worker tests passed; all four normally ignored diagnostics passed when run explicitly (264 total, zero failures). Formatting and strict all-target/all-feature Clippy passed. In the final unoptimised timing diagnostics, 28,000 words had a 4.4 ms warm editor-frame median; a single 28,001-word wrapped paragraph measured 54 pages with a 3.7 ms warm median and an 839 ms edit/reflow. These measurements exclude GPU presentation and persistence I/O and are not release-build latency guarantees.
+Local final source result: 259 library tests and 3 speech-worker tests passed; all four normally ignored diagnostics passed when run explicitly (266 total, zero failures). Formatting and strict all-target/all-feature Clippy passed. In the unoptimised timing diagnostics, 28,000 words had a 2.8 ms warm editor-frame median; a single 28,001-word wrapped paragraph measured 54 pages with a 3.2 ms warm median and a 669 ms edit/reflow. These measurements exclude GPU presentation and persistence I/O and are not release-build latency guarantees.
 
 ## Verification boundaries
 

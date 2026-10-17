@@ -3,7 +3,7 @@ use super::*;
 fn hit_rect(pos: Pos2, height: f32, scale: f32) -> Rect {
     Rect::from_center_size(
         pos + vec2(-11.0 * scale, height * 0.5),
-        vec2(18.0 * scale, height.max(18.0 * scale)),
+        vec2(18.0 * scale, height),
     )
 }
 
@@ -53,17 +53,19 @@ pub(super) fn checkbox(
             },
         )
     });
-    let square = Rect::from_center_size(hit.center(), vec2(15.0, 15.0) * scale);
+    let ratio = layout::checklist_mark_size(height / scale) / 15.0;
+    let mark_scale = ratio * scale;
+    let square = Rect::from_center_size(hit.center(), vec2(15.0, 15.0) * mark_scale);
     ui.painter().rect(
         square,
-        3.0 * scale,
+        3.0 * mark_scale,
         if checked {
             p.accent
         } else {
             Color32::TRANSPARENT
         },
         Stroke::new(
-            1.4 * scale,
+            1.4 * mark_scale,
             if checked || response.hovered() {
                 p.accent
             } else {
@@ -76,12 +78,18 @@ pub(super) fn checkbox(
         let ink = if p.dark { p.chrome } else { Color32::WHITE };
         let c = square.center();
         ui.painter().line_segment(
-            [c + vec2(-4.0, 0.0) * scale, c + vec2(-1.0, 3.0) * scale],
-            Stroke::new(1.7 * scale, ink),
+            [
+                c + vec2(-4.0, 0.0) * mark_scale,
+                c + vec2(-1.0, 3.0) * mark_scale,
+            ],
+            Stroke::new(1.7 * mark_scale, ink),
         );
         ui.painter().line_segment(
-            [c + vec2(-1.0, 3.0) * scale, c + vec2(4.5, -3.5) * scale],
-            Stroke::new(1.7 * scale, ink),
+            [
+                c + vec2(-1.0, 3.0) * mark_scale,
+                c + vec2(4.5, -3.5) * mark_scale,
+            ],
+            Stroke::new(1.7 * mark_scale, ink),
         );
     }
     #[cfg(test)]

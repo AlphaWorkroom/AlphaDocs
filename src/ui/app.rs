@@ -683,7 +683,11 @@ impl AlphaDocs {
                     self.status = format!("Imported with limitations: {}", warnings.join(" "));
                 }
             }
-            Err(e) => self.status = e,
+            Err(e) => {
+                self.status = "Could not open document".into();
+                self.message = format!("Could not open {}\n\n{e}", path.display());
+                self.dialog = Some(Dialog::Message);
+            }
         }
     }
     fn ensure_layout(&mut self, ctx: &Context) {

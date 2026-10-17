@@ -4,6 +4,12 @@ use eframe::egui::{
 };
 use std::{collections::HashMap, sync::Arc};
 
+/// Physical checkbox size shared by the canvas and PDF. Leave a gap between
+/// adjacent lines even when paragraphs have no extra spacing.
+pub fn checklist_mark_size(line_height: f32) -> f32 {
+    (line_height * 0.7).min(15.0)
+}
+
 #[derive(Clone)]
 pub struct Line {
     pub address: Address,

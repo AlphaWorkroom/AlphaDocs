@@ -9,6 +9,9 @@
 - Custom colour pinning rejects invalid HEX/RGB input, already-pinned colours and a full palette, with an explanatory disabled tooltip. It no longer pins an old preview value after an invalid edit.
 - Drawn signatures end their current stroke when the pointer leaves the window or the window loses focus, preventing an unwanted connecting line on return.
 - The empty Documents homepage now reflects whether autosave is enabled.
+- PDF body text uses the bundled emoji fallback for missing glyphs and keeps joined/modifier sequences together, including variation selectors without duplicate searchable text.
+- Closely spaced checklists have separate click regions; checkbox marks fit their measured line height on screen and in PDF instead of touching adjacent marks.
+- Opening a missing or invalid document shows a visible error from both Documents and the editor while retaining the current document and original file.
 - Added full UI-frame regressions for interrupted signatures, palette validation, save/selection/viewport integrity, window resize gestures and both scrollbar axes across light/dark themes, window sizes and zoom levels.
 
 ## 0.1.4 — 17 October 2026

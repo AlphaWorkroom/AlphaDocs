@@ -107,6 +107,21 @@ fn checklist_toolbar_checkbox_undo_and_readonly_work_in_light_and_dark_frames() 
         }
         settle(&context, &mut app);
         let item = Address::default();
+        let first = bounds(&context, ("checklist_bounds", item));
+        let next = bounds(
+            &context,
+            (
+                "checklist_bounds",
+                Address {
+                    block: 1,
+                    ..Default::default()
+                },
+            ),
+        );
+        assert!(
+            first.bottom() <= next.top(),
+            "adjacent checklist hit regions must not overlap in {theme:?}: {first:?} {next:?}"
+        );
         click(
             &context,
             &mut app,

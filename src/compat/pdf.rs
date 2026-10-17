@@ -6,6 +6,7 @@ use crate::{
 };
 use printpdf::*;
 use std::{collections::HashMap, path::Path};
+use unicode_segmentation::UnicodeSegmentation;
 
 fn rgb(c: [u8; 3]) -> Color {
     Color::Rgb(Rgb::new(
@@ -76,17 +77,21 @@ fn checklist_marker(
 ) {
     use eframe::egui::{Rect, pos2, vec2};
     let center = pos2(rect.left() - 11.0, rect.center().y);
-    let square = Rect::from_center_size(center, vec2(15.0, 15.0));
+    let size = crate::layout::checklist_mark_size(rect.height());
+    let ratio = size / 15.0;
+    let square = Rect::from_center_size(center, vec2(size, size));
     ops.push(Op::SaveGraphicsState);
     stroke(ops, square, h, color, true);
     if checked {
-        ops.push(Op::SetOutlineThickness { pt: Pt(1.7) });
+        ops.push(Op::SetOutlineThickness {
+            pt: Pt(1.7 * ratio),
+        });
         ops.push(Op::DrawLine {
             line: Line {
                 points: [vec2(-4.0, 0.0), vec2(-1.0, 3.0), vec2(4.5, -3.5)]
                     .into_iter()
                     .map(|offset| LinePoint {
-                        p: point(center.x + offset.x, h - center.y - offset.y),
+                        p: point(center.x + offset.x * ratio, h - center.y - offset.y * ratio),
                         bezier: false,
                     })
                     .collect(),
@@ -124,6 +129,10 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
         // `symbol_key` stay the same Unicode glyphs in searchable PDF text.
         TextStyle {
             font: "Noto Sans Math".into(),
+            ..Default::default()
+        },
+        TextStyle {
+            font: "Noto Emoji".into(),
             ..Default::default()
         },
         doc.page.header.style.clone(),
@@ -279,15 +288,28 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                     ]);
                 }
             }
+            let line_text: String = p.chars[line.start..line.end].iter().map(|c| c.ch).collect();
+            let mut font_keys = Vec::with_capacity(line.end - line.start);
+            let mut offset = line.start;
+            for grapheme in line_text.graphemes(true) {
+                let count = grapheme.chars().count();
+                let emoji = fonts::emoji_fallback_key(&p.chars[offset].style, grapheme);
+                for ch in &p.chars[offset..offset + count] {
+                    font_keys.push(
+                        emoji.map_or_else(|| fonts::symbol_key(&ch.style, ch.ch), str::to_owned),
+                    );
+                }
+                offset += count;
+            }
             let mut start = line.start;
             while start < line.end {
                 let s = &p.chars[start].style;
-                let key = fonts::symbol_key(s, p.chars[start].ch);
+                let key = &font_keys[start - line.start];
                 let mut end = start + 1;
                 while end < line.end
                     && p.chars[end].style == *s
                     && p.chars[end].ch != '\t'
-                    && fonts::symbol_key(s, p.chars[end].ch) == key
+                    && &font_keys[end - line.start] == key
                 {
                     end += 1;
                 }
@@ -308,7 +330,7 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                     );
                 }
                 let text: String = p.chars[start..end].iter().map(|c| c.ch).collect();
-                let face = &faces[&key];
+                let face = &faces[key];
                 let font = harfrust::FontRef::from_index(face.font.as_ref(), face.index)
                     .map_err(|e| e.to_string())?;
                 let data = harfrust::ShaperData::new(&font);
@@ -316,6 +338,11 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                 let mut buffer = harfrust::UnicodeBuffer::new();
                 buffer.push_str(&text);
                 buffer.guess_segment_properties();
+                if key == "Emoji" {
+                    // Variation selectors are consumed by shaping. Do not emit
+                    // their hidden space glyph with a second ToUnicode entry.
+                    buffer.set_flags(harfrust::BufferFlags::REMOVE_DEFAULT_IGNORABLES);
+                }
                 let shaped = shaper.shape(buffer, harfrust::ShapeOptions::new());
                 let factor = s.rendered_size() / shaper.units_per_em() as f32;
                 let mut pen = 0.0;
@@ -346,7 +373,7 @@ pub fn encode(doc: &Document, layout: &Layout) -> Result<Vec<u8>, String> {
                         ops.extend([
                             Op::StartTextSection,
                             Op::SetFont {
-                                font: PdfFontHandle::External(ids[&key].clone()),
+                                font: PdfFontHandle::External(ids[key].clone()),
                                 size: Pt(s.rendered_size()),
                             },
                             Op::SetTextCursor { pos: point(gx, gy) },
@@ -507,6 +534,29 @@ mod tests {
             extracted.contains(&format!("┌─┐│├┤└┘→←↑↓↔{arrows}")),
             "{extracted}"
         );
+    }
+    #[test]
+    fn pdf_body_emoji_fallback_preserves_joined_sequences_without_tofu() {
+        let text = "Emoji: 😀 🫠 👩‍💻 👋🏽 👨‍👩‍👧‍👦 ❤️ 🇦🇺 and arrows → ⟹.";
+        let mut doc = Document::new("Body emoji PDF");
+        doc.blocks = vec![Block::Paragraph(Paragraph::from_text(text))];
+        let before = doc.clone();
+        let ctx = eframe::egui::Context::default();
+        fonts::install(&ctx);
+        let mut bytes = Vec::new();
+        let mut output = ctx.run_ui(Default::default(), |_| {
+            bytes = encode(&doc, &Layout::measure(&ctx, &doc)).unwrap();
+        });
+        output.textures_delta.clear();
+        let parsed =
+            PdfDocument::parse(&bytes, &PdfParseOptions::default(), &mut Vec::new()).unwrap();
+        let extracted = parsed.pages[0].extract_text(&parsed.resources).join("");
+        let compact = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        assert!(
+            compact(&extracted).contains(&compact(text)),
+            "{extracted:?}"
+        );
+        assert_eq!(doc, before);
     }
     #[test]
     fn pdf_preserves_measured_pages_fonts_and_links() {

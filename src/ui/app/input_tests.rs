@@ -2789,6 +2789,46 @@ fn previous_native_files_open_without_becoming_a_save_overwrite_target() {
 }
 
 #[test]
+fn failed_document_open_is_visible_from_home_and_editor_without_replacing_work() {
+    for home in [true, false] {
+        let (ctx, mut app) = editor();
+        app.session.editor.insert("Keep the current café document");
+        app.session.saved_library_revision = app.session.editor.revision;
+        app.home = home;
+        let before = app.session.editor.doc.clone();
+        let caret = app.session.editor.caret;
+        let path =
+            std::env::temp_dir().join(format!("alphadocs-invalid-{}.adocs", Document::new("").id));
+        let corrupt = b"{not a valid native document";
+        std::fs::write(&path, corrupt).unwrap();
+        for missing in [false, true] {
+            if missing {
+                std::fs::remove_file(&path).unwrap();
+            }
+            app.dialog = None;
+            app.open_path(path.clone());
+            assert!(matches!(app.dialog, Some(Dialog::Message)));
+            assert!(app.message.contains("Could not open"));
+            assert!(
+                app.message
+                    .contains(path.file_name().unwrap().to_str().unwrap())
+            );
+            image_frame(&ctx, &mut app, vec![]);
+            image_frame(&ctx, &mut app, vec![]);
+            assert_eq!(app.home, home);
+            assert_eq!(app.session.editor.doc, before);
+            assert_eq!(app.session.editor.caret, caret);
+            assert!(app.session.file.is_none());
+            if !missing {
+                assert_eq!(std::fs::read(&path).unwrap(), corrupt);
+            }
+        }
+        app.session.editor.undo();
+        assert!(app.session.editor.doc.text().is_empty());
+    }
+}
+
+#[test]
 fn homepage_search_and_actions_stay_separate_during_narrow_resizes_and_accept_input() {
     for theme in [Theme::Light, Theme::Dark] {
         let ctx = Context::default();

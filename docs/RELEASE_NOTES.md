@@ -9,6 +9,9 @@ This maintenance update fixes issues found in another native interaction QA pass
 - Invalid custom colours cannot pin an older preview value; duplicate/full palettes explain why pinning is disabled.
 - Signature drawing stops cleanly when the pointer or window focus is lost.
 - The empty homepage accurately reflects the Autosave preference.
+- Emoji in body text export with the bundled fallback font, including joined and skin-tone sequences.
+- Closely spaced checklist items have distinct click regions and properly sized marks on screen and in PDF.
+- Missing or invalid files show an opening error without replacing the current document.
 
 Full UI-frame regression coverage includes both themes, 100%/200% zoom, 960–1920-pixel layouts, selection preservation and undo. Native Windows interaction checks and automated platform checks are distinct from physical Mac/Linux device testing.
 
