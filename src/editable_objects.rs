@@ -2,6 +2,7 @@
 use crate::{fonts, layout, model::*};
 use eframe::egui::Context;
 use std::collections::BTreeMap;
+use unicode_segmentation::UnicodeSegmentation;
 
 fn esc(s: &str) -> String {
     quick_xml::escape::escape(s).into_owned()
@@ -39,15 +40,41 @@ pub fn latex_from_omml(xml: &str) -> Result<String, String> {
 }
 
 pub fn source_fonts(source: &ObjectSource) -> BTreeMap<String, Vec<u8>> {
-    let mut fonts_map = BTreeMap::new();
     if let ObjectSource::Drawing { text, .. } = source {
-        for style in std::iter::once(&text.style).chain(text.chars.iter().map(|c| &c.style)) {
-            fonts_map
-                .entry(fonts::key(style))
-                .or_insert_with(|| fonts::face(style).font.to_vec());
-        }
+        drawing_fonts(text)
+            .into_iter()
+            .map(|(key, face)| (key, face.font.to_vec()))
+            .collect()
+    } else {
+        BTreeMap::new()
     }
-    fonts_map
+}
+fn drawing_key(style: &TextStyle, grapheme: &str) -> String {
+    fonts::emoji_fallback_key(style, grapheme)
+        .map(str::to_owned)
+        .unwrap_or_else(|| fonts::symbol_key(style, grapheme.chars().next().unwrap_or(' ')))
+}
+fn drawing_fonts(text: &Paragraph) -> BTreeMap<String, std::sync::Arc<eframe::egui::FontData>> {
+    let mut result = BTreeMap::new();
+    result.insert(fonts::key(&text.style), fonts::face(&text.style));
+    let mut offset = 0;
+    for grapheme in text.text().graphemes(true) {
+        let style = text
+            .chars
+            .get(offset)
+            .map(|c| &c.style)
+            .unwrap_or(&text.style);
+        let key = drawing_key(style, grapheme);
+        result.entry(key.clone()).or_insert_with(|| {
+            fonts::FONTS
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, bytes)| std::sync::Arc::new(eframe::egui::FontData::from_static(bytes)))
+                .unwrap_or_else(|| fonts::face(style))
+        });
+        offset += grapheme.chars().count();
+    }
+    result
 }
 
 pub fn validate_svg(svg: &[u8]) -> Result<(), String> {
@@ -276,16 +303,15 @@ fn drawing_svg(
     }
     let mut offset = 0;
     let mut families = BTreeMap::new();
-    for style in std::iter::once(&text.style).chain(text.chars.iter().map(|c| &c.style)) {
-        families.entry(fonts::key(style)).or_insert_with(|| {
-            let face = fonts::face(style);
+    for (key, face) in drawing_fonts(text) {
+        families.entry(key.clone()).or_insert_with(|| {
             let mut db = resvg::usvg::fontdb::Database::new();
             db.load_font_data(face.font.to_vec());
             db.faces()
                 .find(|info| info.index == face.index)
                 .and_then(|info| info.families.first())
                 .map(|(name, _)| name.clone())
-                .unwrap_or_else(|| style.font.clone())
+                .unwrap_or(key)
         });
     }
     for row in &galley.rows {
@@ -294,11 +320,25 @@ fn drawing_svg(
             Alignment::Right => text_width - row.size.x,
             _ => 0.0,
         };
-        // Preserve native measured glyph positions, including styled runs.
-        for glyph in &row.glyphs {
+        // Preserve measured positions without breaking combining/ZWJ sequences.
+        let row_text: String = text
+            .chars
+            .iter()
+            .skip(offset)
+            .take(row.glyphs.len())
+            .map(|c| c.ch)
+            .collect();
+        let mut local = 0;
+        for grapheme in row_text.graphemes(true) {
+            let glyph = &row.glyphs[local];
+            let count = grapheme.chars().count();
+            let advance: f32 = row.glyphs[local..local + count]
+                .iter()
+                .map(|g| g.advance_width)
+                .sum();
             let style = text
                 .chars
-                .get(offset)
+                .get(offset + local)
                 .map(|c| &c.style)
                 .unwrap_or(&text.style);
             let x = inset_x + shift + glyph.pos.x;
@@ -307,12 +347,12 @@ fn drawing_svg(
                 svg.push_str(&format!(
                     "<rect x=\"{x}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
                     y - glyph.font_ascent,
-                    glyph.advance_width,
+                    advance,
                     glyph.font_height,
                     colour(fill)
                 ));
             }
-            svg.push_str(&format!("<text xml:space=\"preserve\" x=\"{x}\" y=\"{y}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\">{}</text>",esc(&families[&fonts::key(style)]),style.rendered_size(),if style.bold {"bold"}else{"normal"},if style.italic {"italic"}else{"normal"},colour(style.color),esc(&glyph.chr.to_string())));
+            svg.push_str(&format!("<text xml:space=\"preserve\" x=\"{x}\" y=\"{y}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" fill=\"{}\">{}</text>",esc(&families[&drawing_key(style, grapheme)]),style.rendered_size(),if style.bold {"bold"}else{"normal"},if style.italic {"italic"}else{"normal"},colour(style.color),esc(grapheme)));
             for dy in [
                 style.underline.then_some(1.0),
                 style.strike.then_some(-style.rendered_size() * 0.3),
@@ -320,11 +360,11 @@ fn drawing_svg(
             .into_iter()
             .flatten()
             {
-                svg.push_str(&format!("<line x1=\"{x}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{}\" stroke-width=\"0.7\"/>",y+dy,x+glyph.advance_width,y+dy,colour(style.color)));
+                svg.push_str(&format!("<line x1=\"{x}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{}\" stroke-width=\"0.7\"/>",y+dy,x+advance,y+dy,colour(style.color)));
             }
-            offset += 1;
+            local += count;
         }
-        offset += usize::from(row.ends_with_newline);
+        offset += row.glyphs.len() + usize::from(row.ends_with_newline);
     }
     svg.push_str("</svg>");
     Ok(svg)

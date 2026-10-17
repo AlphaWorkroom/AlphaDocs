@@ -211,6 +211,7 @@ pub(super) fn read_math(
 }
 pub(super) fn read_drawing(
     drawing: &Node,
+    anchor_paragraph: &Node,
     rels: &HashMap<String, String>,
     styles: &Styles,
     numbering: &HashMap<String, ListKind>,
@@ -293,11 +294,14 @@ pub(super) fn read_drawing(
     let horizontal_line =
         matches!(kind, ShapeKind::Line | ShapeKind::Arrow) && standard_height <= 0.01;
     let height = if horizontal_line {
-        drawing
-            .descendant("docPr")
-            .and_then(|n| n.attr("lineBoxHeight"))
-            .and_then(|s| s.parse::<f32>().ok())
-            .filter(|h| h.is_finite() && (12.0..=1500.0).contains(h))
+        line_box_height(anchor_paragraph)
+            .or_else(|| {
+                drawing
+                    .descendant("docPr")
+                    .and_then(|n| n.attr("lineBoxHeight"))
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .filter(|h| h.is_finite() && (12.0..=1500.0).contains(h))
+            })
             .unwrap_or(12.0)
     } else {
         standard_height
@@ -319,4 +323,13 @@ pub(super) fn read_drawing(
     }
     restore_metadata(&mut image, drawing.descendant("docPr"));
     Ok(image)
+}
+
+pub(super) fn line_box_height(paragraph: &Node) -> Option<f32> {
+    let spacing = paragraph.child("pPr")?.child("spacing")?;
+    if spacing.attr("lineRule") != Some("exact") {
+        return None;
+    }
+    let height = spacing.attr("line")?.parse::<f32>().ok()? / 20.0;
+    (height.is_finite() && (12.0..=1500.0).contains(&height)).then_some(height)
 }

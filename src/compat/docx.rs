@@ -1241,8 +1241,8 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
         // to reserve its object box. Its native image height retains that space.
         if n.name == "p"
             && n.descendant("t").is_none()
-            && n.descendant("docPr")
-                .is_some_and(|p| p.attr("lineBoxHeight").is_some())
+            && objects::line_box_height(n).is_some()
+            && n.descendant("extent").and_then(|p| p.attr("cy")) == Some("0")
             && n.descendant("prstGeom").and_then(|p| p.attr("prst")) == Some("line")
         {
             return false;
@@ -1441,6 +1441,7 @@ pub fn import(path: &Path) -> Result<(Document, Vec<String>), String> {
                     if drawing.descendant("wsp").is_some() {
                         match objects::read_drawing(
                             drawing,
+                            n,
                             &rels,
                             &styles,
                             &numbering,

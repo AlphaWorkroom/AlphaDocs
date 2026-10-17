@@ -69,7 +69,60 @@ fn horizontal_word_lines_use_zero_vertical_geometry_and_keep_native_object_boxes
             after.editable.as_ref().unwrap().source
         );
     }
+    // Word removes private attributes. Standard paragraph spacing must retain
+    // the native anchor box and offset after a real external save.
+    let standard_path = path.with_extension("standard.docx");
+    let mut archive = ZipArchive::new(File::open(&path).unwrap()).unwrap();
+    let mut output = ZipWriter::new(File::create(&standard_path).unwrap());
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).unwrap();
+        let name = entry.name().to_owned();
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).unwrap();
+        if name == "word/document.xml" {
+            bytes = String::from_utf8(bytes)
+                .unwrap()
+                .replace(" alphadocs:lineBoxHeight=\"80\"", "")
+                .into_bytes();
+        }
+        output
+            .start_file(name, SimpleFileOptions::default())
+            .unwrap();
+        output.write_all(&bytes).unwrap();
+    }
+    output.finish().unwrap();
+    let (standard, warnings) = docx::import(&standard_path).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    for (before, after) in images(&doc).iter().zip(images(&standard)) {
+        assert_eq!((before.width, before.height), (after.width, after.height));
+        assert_eq!(before.placement.offset, after.placement.offset);
+    }
+    drop(archive);
+    std::fs::remove_file(standard_path).unwrap();
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn drawing_symbols_embed_real_fallback_fonts_and_preserve_emoji_sequences() {
+    let image = editable_objects::prepare(
+        &eframe::egui::Context::default(),
+        ObjectSource::Drawing {
+            kind: ShapeKind::TextBox,
+            text: Box::new(Paragraph::from_text("café 👩🏽‍💻 ⟶ ┌──┐")),
+            fill: None,
+            border: CellBorder::default(),
+        },
+        400.0,
+        80.0,
+    )
+    .unwrap();
+    let object = image.editable.as_ref().unwrap();
+    assert!(object.svg.contains(">👩🏽‍💻</text>"));
+    assert!(object.svg.contains(">⟶</text>"));
+    let fonts = editable_objects::source_fonts(&object.source);
+    assert!(fonts.contains_key("Emoji"));
+    assert!(fonts.contains_key("Math") || fonts.contains_key("Mono"));
+    assert!(image::load_from_memory(&image.data).is_ok());
 }
 
 #[test]

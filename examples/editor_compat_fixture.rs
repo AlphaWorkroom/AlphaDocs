@@ -201,6 +201,18 @@ fn main() -> Result<(), String> {
         &measured.ok_or("No layout")?,
         &output.join("story.pdf"),
     )?;
+    let symbols = alphadocs::editable_objects::prepare(
+        &context,
+        ObjectSource::Drawing {
+            kind: ShapeKind::TextBox,
+            text: Box::new(Paragraph::from_text("café 👩🏽‍💻 ⟶ ┌──┐")),
+            fill: Some([255; 3]),
+            border: CellBorder::default(),
+        },
+        400.0,
+        80.0,
+    )?;
+    persistence::atomic_write(&output.join("drawing-symbols.png"), &symbols.data)?;
     println!(
         "DOCX text/format fixture and measured PDF written to {}",
         output.display()
