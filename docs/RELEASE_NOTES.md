@@ -1,4 +1,18 @@
-# AlphaDocs 0.1.4
+# AlphaDocs 0.1.5
+
+This maintenance update fixes issues found in another native interaction QA pass:
+
+- Fast horizontal scrollbar drags keep the correct pointer owner, including the corner where the two bars meet.
+- Fast mouse drags select text correctly even when the gesture arrives in one frame.
+- Saving and exporting keep your reading position. Unhandled Escape presses no longer jump to the caret.
+- Editor panels no longer cover window resize edges.
+- Invalid custom colours cannot pin an older preview value; duplicate/full palettes explain why pinning is disabled.
+- Signature drawing stops cleanly when the pointer or window focus is lost.
+- The empty homepage accurately reflects the Autosave preference.
+
+Full UI-frame regression coverage includes both themes, 100%/200% zoom, 960–1920-pixel layouts, selection preservation and undo. Native Windows interaction checks and automated platform checks are distinct from physical Mac/Linux device testing.
+
+The features introduced in 0.1.4 remain included:
 
 - Drag the native document scrollbar normally; text selection and outline navigation remain intact.
 - Pick any text/highlight colour using a native colour wheel, brightness rail or HEX/RGB fields, and pin it to your palette.

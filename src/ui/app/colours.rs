@@ -315,9 +315,27 @@ impl AlphaDocs {
                     apply = Some((state.colour, state.highlight));
                     *close = true;
                 }
-                if ui
-                    .add(egui::Button::new("Pin colour").stroke(Stroke::new(1.0, p.accent)))
+                let can_pin = state.valid()
+                    && !self.prefs.pinned_colours.contains(&state.colour)
+                    && self.prefs.pinned_colours.len() < PINNED_COLOUR_LIMIT;
+                let pin_response = ui.add_enabled(
+                    can_pin,
+                    egui::Button::new("Pin colour").stroke(Stroke::new(1.0, p.accent)),
+                );
+                #[cfg(test)]
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(Id::new("colour_pin_bounds"), pin_response.rect)
+                });
+                if pin_response
+                    .on_disabled_hover_text(if !state.valid() {
+                        "Enter a valid HEX or RGB colour first"
+                    } else if self.prefs.pinned_colours.contains(&state.colour) {
+                        "This colour is already pinned"
+                    } else {
+                        "Palette full. Unpin a colour to make room."
+                    })
                     .clicked()
+                    && can_pin
                 {
                     pin = Some(state.colour);
                 }
@@ -672,6 +690,64 @@ mod tests {
         app.dialog = None; // Cancel discards the preview state.
         app.colour_picker = None;
         assert_eq!(app.session.editor.doc, original);
+    }
+
+    #[test]
+    fn invalid_duplicate_and_full_palettes_reject_pin_clicks_without_changing_document() {
+        let (ctx, mut app) = editor();
+        let original = app.session.editor.doc.clone();
+        app.dialog = Some(Dialog::ColourPicker);
+        app.colour_picker = Some(PickerState::new(false, [11, 87, 208]));
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        let click_pin = |app: &mut AlphaDocs| {
+            for _ in 0..2 {
+                frame(&ctx, app, vec![]);
+            }
+            let pos = ctx
+                .data(|d| d.get_temp::<Rect>(Id::new("colour_pin_bounds")))
+                .unwrap()
+                .center();
+            frame(
+                &ctx,
+                app,
+                vec![
+                    Event::PointerMoved(pos),
+                    Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        };
+        let state = app.colour_picker.as_mut().unwrap();
+        state.hex = "invalid".into();
+        state.set_hex();
+        click_pin(&mut app);
+        assert!(
+            app.prefs.pinned_colours.is_empty(),
+            "invalid input must not pin the previous RGB value"
+        );
+        app.colour_picker = Some(PickerState::new(false, [11, 87, 208]));
+        click_pin(&mut app);
+        assert_eq!(app.prefs.pinned_colours, [[11, 87, 208]]);
+        click_pin(&mut app);
+        assert_eq!(app.prefs.pinned_colours.len(), 1);
+        app.prefs.pinned_colours = (0..PINNED_COLOUR_LIMIT).map(|i| [i as u8, 0, 0]).collect();
+        let full = app.prefs.pinned_colours.clone();
+        click_pin(&mut app);
+        assert_eq!(app.prefs.pinned_colours, full);
+        assert_eq!(app.session.editor.doc, original);
+        assert!(matches!(app.dialog, Some(Dialog::ColourPicker)));
     }
 
     #[test]

@@ -1955,6 +1955,208 @@ fn mouse_clicks_select_empty_cells_and_context_click_targets_the_clicked_row() {
 }
 
 #[test]
+#[cfg(not(target_os = "macos"))]
+fn window_resize_corner_dispatches_through_full_editor_chrome() {
+    for split in [false, true] {
+        let (ctx, mut app) = editor();
+        let original = app.session.editor.doc.clone();
+        let frame = |app: &mut AlphaDocs, events| {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.update_ui(ui),
+            );
+            out.textures_delta.clear();
+            out.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .clone()
+        };
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        let start = pos2(997.0, 797.0);
+        let end = start - vec2(70.0, 40.0);
+        let mut events = vec![
+            Event::PointerMoved(start),
+            pointer(start, egui::PointerButton::Primary, true),
+        ];
+        if !split {
+            events.push(Event::PointerMoved(end));
+        }
+        let mut commands = frame(&mut app, events);
+        if split {
+            commands.extend(frame(&mut app, vec![Event::PointerMoved(end)]));
+        }
+        assert!(
+            commands.iter().any(|c| matches!(
+                c,
+                egui::ViewportCommand::BeginResize(egui::ResizeDirection::SouthEast)
+            )),
+            "bottom-right resize must not be swallowed by editor panels: {commands:?}"
+        );
+        frame(
+            &mut app,
+            vec![pointer(end, egui::PointerButton::Primary, false)],
+        );
+        assert_eq!(app.session.editor.doc, original);
+    }
+}
+
+#[test]
+fn explicit_save_preserves_the_reading_viewport_and_document_selection() {
+    let (ctx, mut app) = editor();
+    app.session.editor.doc.blocks = (0..75)
+        .map(|i| {
+            Block::Paragraph(Paragraph::from_text(&format!(
+                "Paragraph {i}: {}",
+                "Reading the long document. ".repeat(12)
+            )))
+        })
+        .collect();
+    app.session.editor.place(
+        Position {
+            address: Address {
+                block: 74,
+                ..Default::default()
+            },
+            offset: 4,
+        },
+        false,
+    );
+    image_frame(&ctx, &mut app, vec![]);
+    image_frame(&ctx, &mut app, vec![]);
+    let id = ctx
+        .data(|d| d.get_temp::<Id>(Id::new("canvas_scroll_id")))
+        .unwrap();
+    let mut state = egui::scroll_area::State::load(&ctx, id).unwrap();
+    state.offset = vec2(0.0, 200.0);
+    state.store(&ctx, id);
+    app.scroll_caret = false;
+    image_frame(&ctx, &mut app, vec![]);
+    let before = egui::scroll_area::State::load(&ctx, id).unwrap().offset;
+    ctx.memory_mut(|m| m.request_focus(Id::new("document_canvas")));
+    image_frame(
+        &ctx,
+        &mut app,
+        vec![key(Key::Escape, egui::Modifiers::NONE)],
+    );
+    image_frame(&ctx, &mut app, vec![]);
+    assert_eq!(
+        egui::scroll_area::State::load(&ctx, id).unwrap().offset,
+        before,
+        "an unhandled Escape must not move the reading viewport"
+    );
+    let caret = app.session.editor.caret;
+    let path =
+        std::env::temp_dir().join(format!("alphadocs-qa-save-{}.adocs", Document::new("").id));
+    app.session.file = Some(path.clone());
+    app.execute(Action::Save, &ctx);
+    image_frame(&ctx, &mut app, vec![]);
+    image_frame(&ctx, &mut app, vec![]);
+    let after = egui::scroll_area::State::load(&ctx, id).unwrap().offset;
+    let loaded = persistence::load_document(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(loaded, app.session.editor.doc);
+    assert_eq!(app.session.editor.caret, caret);
+    assert!(
+        (after.y - before.y).abs() < 1.0,
+        "Save must not jump to an offscreen caret: {before:?} -> {after:?}"
+    );
+}
+
+#[test]
+fn canvas_scrollbars_keep_selection_at_multiple_zoom_sizes_and_themes() {
+    for (theme, size, zoom) in [
+        (Theme::Light, vec2(1440.0, 960.0), 1.0),
+        (Theme::Dark, vec2(960.0, 640.0), 1.0),
+        (Theme::Light, vec2(960.0, 640.0), 2.0),
+        (Theme::Dark, vec2(1920.0, 1032.0), 2.0),
+    ] {
+        let (ctx, mut app) = editor();
+        app.prefs.theme = theme;
+        app.prefs.zoom = zoom;
+        app.prefs.autosave = false;
+        app.session.editor.doc.blocks = (0..32)
+            .map(|i| {
+                Block::Paragraph(Paragraph::from_text(&format!(
+                    "Observation {i}. {}",
+                    "The measured path follows the harbour. ".repeat(8)
+                )))
+            })
+            .collect();
+        app.session.editor.place(Position::default(), false);
+        app.session.editor.move_horizontal(true, true, true);
+        let original = app.session.editor.doc.clone();
+        let selection = (app.session.editor.anchor, app.session.editor.caret);
+        let frame = |app: &mut AlphaDocs, events| {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.update_ui(ui),
+            );
+            out.textures_delta.clear();
+        };
+        for _ in 0..3 {
+            frame(&mut app, vec![]);
+        }
+        let id = ctx
+            .data(|d| d.get_temp::<Id>(Id::new("canvas_scroll_id")))
+            .unwrap();
+        for axis in [1usize, 0] {
+            let Some(bar) = ctx.read_response(id.with(axis)) else {
+                assert_eq!(axis, 0, "long document always has a vertical scrollbar");
+                continue;
+            };
+            let mut state = egui::scroll_area::State::load(&ctx, id).unwrap();
+            state.offset = egui::Vec2::ZERO;
+            state.store(&ctx, id);
+            app.scroll_caret = false;
+            frame(&mut app, vec![]);
+            let start = if axis == 1 {
+                pos2(bar.rect.center().x, bar.rect.top() + 8.0)
+            } else {
+                pos2(bar.rect.left() + 8.0, bar.rect.center().y)
+            };
+            let end = if axis == 1 {
+                pos2(start.x, bar.rect.bottom() - 8.0)
+            } else {
+                pos2(bar.rect.right() - 8.0, start.y)
+            };
+            frame(
+                &mut app,
+                vec![
+                    Event::PointerMoved(start),
+                    pointer(start, egui::PointerButton::Primary, true),
+                    Event::PointerMoved(end),
+                ],
+            );
+            frame(
+                &mut app,
+                vec![pointer(end, egui::PointerButton::Primary, false)],
+            );
+            let offset = egui::scroll_area::State::load(&ctx, id).unwrap().offset;
+            assert!(
+                offset[axis] > 10.0,
+                "axis {axis} did not scroll at {size:?}, zoom {zoom}: {offset:?}, bar {:?}, hit {:?}",
+                bar.rect,
+                bar.interact_rect
+            );
+            assert_eq!(
+                (app.session.editor.anchor, app.session.editor.caret),
+                selection,
+                "scrollbar gestures must never place a document caret"
+            );
+            assert_eq!(app.session.editor.doc, original);
+        }
+    }
+}
+
+#[test]
 fn canvas_scrollbar_drag_keeps_pointer_ownership_from_press_through_release() {
     let (ctx, mut app) = editor();
     app.prefs.outline = false;
@@ -2028,6 +2230,66 @@ fn canvas_scrollbar_drag_keeps_pointer_ownership_from_press_through_release() {
         released > initial,
         "release must preserve the scrollbar's final offset"
     );
+}
+
+#[test]
+fn fast_text_drags_select_from_press_to_release_in_coalesced_ui_frames() {
+    for (split_release, viewing) in [(false, false), (true, false), (false, true), (true, true)] {
+        let (ctx, mut app) = editor();
+        app.prefs.outline = false;
+        app.prefs.ruler = false;
+        app.session
+            .editor
+            .insert("Select this café text with the mouse");
+        if viewing {
+            app.session.editor.select_all();
+            app.session
+                .editor
+                .format(|style| style.link = Some("https://example.com".into()));
+            app.session.editor.place(Position::default(), false);
+            app.session.viewing = true;
+        }
+        let original = app.session.editor.doc.clone();
+        image_frame(&ctx, &mut app, vec![]);
+        image_frame(&ctx, &mut app, vec![]);
+        let area = ctx.read_response(Id::new("document_canvas")).unwrap().rect;
+        let layout = app.layout.as_ref().unwrap();
+        let scale = 4.0 / 3.0 * app.prefs.zoom;
+        let left =
+            (area.left() + (area.width() - layout.size.x * scale) * 0.5).max(area.left() + 24.0);
+        let line = layout.lines.first().unwrap();
+        let start = pos2(
+            left + (line.rect.left() + 1.0) * scale,
+            area.top() + 12.0 + line.rect.center().y * scale,
+        );
+        let end = start + vec2(110.0, 0.0);
+        let mut events = vec![
+            Event::PointerMoved(start),
+            pointer(start, egui::PointerButton::Primary, true),
+            Event::PointerMoved(end),
+        ];
+        if !split_release {
+            events.push(pointer(end, egui::PointerButton::Primary, false));
+        }
+        image_frame(&ctx, &mut app, events);
+        if split_release {
+            image_frame(
+                &ctx,
+                &mut app,
+                vec![pointer(end, egui::PointerButton::Primary, false)],
+            );
+        }
+        image_frame(&ctx, &mut app, vec![]);
+        assert!(
+            app.session
+                .editor
+                .selected_text()
+                .starts_with("Select this"),
+            "the complete mouse drag must select text even when input is coalesced: {:?}",
+            app.session.editor.selected_text()
+        );
+        assert_eq!(app.session.editor.doc, original);
+    }
 }
 
 #[test]

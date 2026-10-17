@@ -244,9 +244,6 @@ fn show_with_platform(app: &mut AlphaDocs, ui: &mut Ui, chrome: WindowChrome) {
                 }
             }
         });
-    if chrome == WindowChrome::Custom {
-        resize_edges(ui);
-    }
 }
 fn tab(
     ui: &mut Ui,
@@ -405,7 +402,10 @@ pub(super) fn window_button(ui: &mut Ui, label: &str, kind: u8, p: Palette) -> e
     }
     response.on_hover_text(label)
 }
-fn resize_edges(ui: &mut Ui) {
+pub(super) fn resize_edges(ui: &mut Ui) {
+    if WindowChrome::current() != WindowChrome::Custom {
+        return;
+    }
     let ctx = ui.ctx().clone();
     if ctx.input(|i| {
         i.viewport().maximized.unwrap_or(false) || i.viewport().fullscreen.unwrap_or(false)
@@ -457,7 +457,8 @@ fn resize_edges(ui: &mut Ui) {
                 _ => egui::CursorIcon::ResizeNeSw,
             });
         }
-        if response.drag_started() {
+        // Start while the native button is down, before a fast gesture ends.
+        if response.drag_started() || pointer_gesture::pressed_in(ui, rect).is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
         }
     }

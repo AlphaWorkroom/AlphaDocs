@@ -192,6 +192,11 @@ impl AlphaDocs {
                     modifiers,
                     ..
                 } => {
+                    let before = (
+                        self.session.editor.revision,
+                        self.session.editor.anchor,
+                        self.session.editor.caret,
+                    );
                     let cmd = modifiers.command;
                     let shift = modifiers.shift;
                     if self.session.viewing
@@ -374,7 +379,23 @@ impl AlphaDocs {
                         Key::Tab if !self.session.viewing => self.session.editor.tab(shift),
                         _ => {}
                     }
-                    edited = true;
+                    edited |= before
+                        != (
+                            self.session.editor.revision,
+                            self.session.editor.anchor,
+                            self.session.editor.caret,
+                        )
+                        || matches!(
+                            key,
+                            Key::ArrowLeft
+                                | Key::ArrowRight
+                                | Key::ArrowUp
+                                | Key::ArrowDown
+                                | Key::Home
+                                | Key::End
+                                | Key::PageUp
+                                | Key::PageDown
+                        );
                 }
                 _ => {}
             }

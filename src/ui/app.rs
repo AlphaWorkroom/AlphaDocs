@@ -629,6 +629,7 @@ impl AlphaDocs {
                 Ok(()) => {
                     self.session.file = Some(path);
                     self.status = "Document saved".into();
+                    #[cfg(not(test))]
                     if let Err(e) = persistence::snapshot(&self.session.editor.doc) {
                         self.status = format!("Saved; history failed: {e}");
                     }
@@ -1001,7 +1002,12 @@ impl AlphaDocs {
         }
         if self.dialog.is_none() && !self.home {
             self.refocus = true;
-            self.scroll_caret = true;
+            if !matches!(
+                a,
+                Action::Save | Action::SaveAs | Action::Copy | Action::Export(_)
+            ) {
+                self.scroll_caret = true;
+            }
         }
     }
     fn appearance(&mut self, ui: &mut Ui) {
@@ -2103,6 +2109,7 @@ impl AlphaDocs {
         let ruler = if self.prefs.ruler { 24.0 } else { 0.0 };
         let page_setup = self.session.editor.doc.page.clone();
         let mut target = None;
+        let mut gesture_anchor = None;
         let mut image_clicked = None;
         let mut image_action = None;
         let mut image_move = None;
@@ -2124,6 +2131,22 @@ impl AlphaDocs {
         let rail_width = if show_annotations { 440.0 } else { 0.0 };
         let salt = ("pages", &self.session.editor.doc.id);
         let scroll_id = ui.make_persistent_id(egui::IdSalt::new(salt));
+        #[cfg(test)]
+        ctx.data_mut(|data| data.insert_temp(Id::new("canvas_scroll_id"), scroll_id));
+        // Hit-test the press, not only the final pointer location: a fast
+        // horizontal drag can end over the vertical bar at their shared corner.
+        // Keep the bar that received the press as the owner for the gesture.
+        if ui.is_enabled() && ui.input(|i| i.pointer.primary_down()) {
+            for axis in [0usize, 1] {
+                let id = scroll_id.with(axis);
+                if ctx.read_response(id).is_some_and(|bar| {
+                    bar.enabled() && pointer_gesture::pressed_in(ui, bar.rect).is_some()
+                }) {
+                    ctx.set_dragged_id(id);
+                    break;
+                }
+            }
+        }
         let mut scroll = egui::ScrollArea::both()
             .id_salt(salt)
             .auto_shrink([false, false]);
@@ -2896,13 +2919,14 @@ impl AlphaDocs {
                 && !checkbox_pointer
                 && let Some(pointer) = text_press.or_else(|| response.interact_pointer_pos())
             {
-                let page = (((pointer.y - start_y) / (h + gap)).floor().max(0.0) as usize)
-                    .min(l.pages - 1);
-                let point = pos2(
-                    (pointer.x - left) / scale,
-                    (pointer.y - origin(page).y) / scale,
-                );
-                if let Some(line) = l.hit_line(page, point) {
+                let hit = |pointer: Pos2| {
+                    let page = (((pointer.y - start_y) / (h + gap)).floor().max(0.0) as usize)
+                        .min(l.pages - 1);
+                    let point = pos2(
+                        (pointer.x - left) / scale,
+                        (pointer.y - origin(page).y) / scale,
+                    );
+                    let line = l.hit_line(page, point)?;
                     let bg = if page_setup.color == [255; 3] {
                         [p.paper.r(), p.paper.g(), p.paper.b()]
                     } else {
@@ -2910,7 +2934,7 @@ impl AlphaDocs {
                     };
                     let display =
                         layout::display_line(&ctx, &self.session.editor.doc, line, scale, bg);
-                    let pos = Position {
+                    Some(Position {
                         address: line.address,
                         offset: layout::display_hit(
                             &display,
@@ -2918,15 +2942,29 @@ impl AlphaDocs {
                             line.end,
                             (point.x - line.rect.left()) * scale,
                         ),
-                    };
+                    })
+                };
+                let fast_drag = text_press.and_then(|start| {
+                    ctx.input(|i| i.pointer.interact_pos())
+                        .filter(|end| start.distance(*end) >= 6.0)
+                        .map(|end| (start, end))
+                });
+                let shift = ctx.input(|i| i.modifiers.shift);
+                if let Some((start, _)) = fast_drag
+                    && !shift
+                {
+                    gesture_anchor = hit(start);
+                }
+                if let Some(pos) = hit(fast_drag.map_or(pointer, |(_, end)| end)) {
                     self.image_block = None;
                     self.image_selection_id = None;
                     target = Some((
                         pos,
-                        response.dragged() && !response.drag_started()
-                            || ctx.input(|i| i.modifiers.shift),
-                        response.double_clicked(),
-                        response.triple_clicked(),
+                        fast_drag.is_some()
+                            || response.dragged() && !response.drag_started()
+                            || shift,
+                        fast_drag.is_none() && response.double_clicked(),
+                        fast_drag.is_none() && response.triple_clicked(),
                     ));
                     ctx.memory_mut(|m| m.request_focus(canvas_id));
                     if text_press.is_some() && ui.input(|i| i.pointer.primary_down()) {
@@ -3021,10 +3059,24 @@ impl AlphaDocs {
                 }
             });
         });
+        if let Some(mut anchor) = gesture_anchor {
+            if let Some(paragraph) = self.session.editor.doc.paragraph(anchor.address) {
+                let text = paragraph.text();
+                anchor.offset = std::iter::once(0)
+                    .chain(text.graphemes(true).scan(0, |offset, grapheme| {
+                        *offset += grapheme.chars().count();
+                        Some(*offset)
+                    }))
+                    .min_by_key(|offset| offset.abs_diff(anchor.offset))
+                    .unwrap_or(0);
+            }
+            self.session.editor.place(anchor, false);
+        }
         if let Some((mut pos, extend, double, triple)) = target
             && let Some(para) = self.session.editor.doc.paragraph(pos.address)
         {
-            if (self.session.viewing || ctx.input(|i| i.modifiers.command))
+            if !extend
+                && (self.session.viewing || ctx.input(|i| i.modifiers.command))
                 && let Some(url) = para
                     .chars
                     .get(pos.offset)
@@ -3405,6 +3457,9 @@ impl AlphaDocs {
             self.execute(a, &ctx);
         }
         self.paint_feature_pulse(&ctx);
+        // Register edges after the canvas/status panels, which would otherwise
+        // cover the native resize handles with their full-width responses.
+        chrome::resize_edges(ui);
         if self.refocus && self.dialog.is_none() {
             ctx.request_repaint();
         }

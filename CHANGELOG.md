@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.5 — 17 October 2026
+
+- Fixed fast horizontal scrollbar drags ending at the vertical scrollbar corner. The scrollbar receiving the press keeps pointer ownership; scrolling preserves the document selection.
+- Fast text-selection drags retain their measured press and release positions when Windows coalesces the gesture into one frame, rather than collapsing to a click.
+- Save, Save As, Copy and export retain the reading viewport rather than jumping to an offscreen caret. Unhandled keys such as Escape no longer trigger a caret scroll.
+- Window resize edges register after the editor panels, preventing the canvas/status area from covering them. Native resizing starts on the press rather than waiting for a drag threshold.
+- Custom colour pinning rejects invalid HEX/RGB input, already-pinned colours and a full palette, with an explanatory disabled tooltip. It no longer pins an old preview value after an invalid edit.
+- Drawn signatures end their current stroke when the pointer leaves the window or the window loses focus, preventing an unwanted connecting line on return.
+- The empty Documents homepage now reflects whether autosave is enabled.
+- Added full UI-frame regressions for interrupted signatures, palette validation, save/selection/viewport integrity, window resize gestures and both scrollbar axes across light/dark themes, window sizes and zoom levels.
+
 ## 0.1.4 — 17 October 2026
 
 - Fixed native scrollbar pointer ownership so dragging the thumb does not become a document selection. Mouse-wheel scrolling and outline navigation retain their measured scroll geometry.

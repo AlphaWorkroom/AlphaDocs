@@ -220,7 +220,11 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
                         ui.add_space(12.0);
                         ui.label(
                             RichText::new(
-                                "Documents autosave on this computer. Your work stays local.",
+                                if app.prefs.autosave {
+                                    "Documents autosave on this computer. Your work stays local."
+                                } else {
+                                    "Autosave is off. Use Save to keep your changes. Your work stays local."
+                                },
                             )
                             .size(12.0)
                             .color(p.muted),

@@ -707,6 +707,9 @@ fn signature_pad(ui: &mut Ui, answer: &mut Answer, p: Palette) {
         Vec::new()
     };
     for event in events {
+        if matches!(event, Event::PointerGone | Event::WindowFocused(false)) {
+            answer.active_stroke = None;
+        }
         let point = match event {
             Event::PointerButton {
                 pos,
@@ -1059,6 +1062,58 @@ mod tests {
         );
         assert_eq!(app.signing.answers["signature-1"].text, "Alex Example");
         assert_eq!(app.signing.review.as_ref().unwrap(), &response);
+    }
+
+    #[test]
+    fn drawing_stops_when_pointer_or_window_focus_is_lost() {
+        for interrupted in [Event::PointerGone, Event::WindowFocused(false)] {
+            let ctx = Context::default();
+            let mut app = app_with_request(&ctx);
+            app.signing
+                .answers
+                .entry("signature-1".into())
+                .or_default()
+                .drawn = true;
+            for _ in 0..3 {
+                frame(&ctx, &mut app, vec![]);
+            }
+            let pad = ctx
+                .data(|d| d.get_temp::<Rect>(Id::new("signing_draw_pad")))
+                .unwrap();
+            let a = pad.min + vec2(20.0, 20.0);
+            frame(
+                &ctx,
+                &mut app,
+                vec![
+                    Event::PointerMoved(a),
+                    Event::PointerButton {
+                        pos: a,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            assert!(app.signing.answers["signature-1"].active_stroke.is_some());
+            frame(&ctx, &mut app, vec![interrupted]);
+            assert!(
+                app.signing.answers["signature-1"].active_stroke.is_none(),
+                "leaving the window must end the stroke even without a release event"
+            );
+            let before = app.signing.answers["signature-1"].strokes.clone();
+            frame(
+                &ctx,
+                &mut app,
+                vec![
+                    Event::WindowFocused(true),
+                    Event::PointerMoved(a + vec2(80.0, 40.0)),
+                ],
+            );
+            assert_eq!(
+                app.signing.answers["signature-1"].strokes, before,
+                "returning without a new press must not draw a connecting line"
+            );
+        }
     }
 
     #[test]
