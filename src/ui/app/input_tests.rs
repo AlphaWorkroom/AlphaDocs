@@ -2005,7 +2005,7 @@ fn window_resize_corner_dispatches_through_full_editor_chrome() {
 }
 
 #[test]
-fn explicit_save_preserves_the_reading_viewport_and_document_selection() {
+fn save_and_all_exports_preserve_the_reading_viewport_and_document_selection() {
     let (ctx, mut app) = editor();
     app.session.editor.doc.blocks = (0..75)
         .map(|i| {
@@ -2064,6 +2064,24 @@ fn explicit_save_preserves_the_reading_viewport_and_document_selection() {
         (after.y - before.y).abs() < 1.0,
         "Save must not jump to an offscreen caret: {before:?} -> {after:?}"
     );
+    // Exercise the same post-command path after the native export dialog
+    // returns, without opening an OS file dialog in a headless test.
+    let original = app.session.editor.doc.clone();
+    for action in [Action::ExportPdf, Action::ExportDocx]
+        .into_iter()
+        .chain(compat::export::Format::ALL.into_iter().map(Action::Export))
+    {
+        app.refocus_after_action(action);
+        image_frame(&ctx, &mut app, vec![]);
+        image_frame(&ctx, &mut app, vec![]);
+        let after = egui::scroll_area::State::load(&ctx, id).unwrap().offset;
+        assert!(
+            (after.y - before.y).abs() < 1.0,
+            "export must retain the reading viewport: {before:?} -> {after:?}"
+        );
+        assert_eq!(app.session.editor.caret, caret);
+        assert_eq!(app.session.editor.doc, original);
+    }
 }
 
 #[test]

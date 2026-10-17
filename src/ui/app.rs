@@ -1000,11 +1000,19 @@ impl AlphaDocs {
                 }
             }),
         }
+        self.refocus_after_action(a);
+    }
+    fn refocus_after_action(&mut self, a: Action) {
         if self.dialog.is_none() && !self.home {
             self.refocus = true;
             if !matches!(
                 a,
-                Action::Save | Action::SaveAs | Action::Copy | Action::Export(_)
+                Action::Save
+                    | Action::SaveAs
+                    | Action::Copy
+                    | Action::ExportPdf
+                    | Action::ExportDocx
+                    | Action::Export(_)
             ) {
                 self.scroll_caret = true;
             }

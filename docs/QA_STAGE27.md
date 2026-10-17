@@ -22,7 +22,9 @@ This pass uses synthetic documents and an isolated AlphaDocs profile. It does no
 
 Local logs, original fixtures, before/after failure logs and native screenshots are retained in `qa/stage27/`. Published artifacts must be checked against the final CI source and their SHA-256 before delivery.
 
-Local final source result: 257 library tests and 3 speech-worker tests passed; all four normally ignored diagnostics passed when run explicitly (264 total, zero failures). Formatting and strict all-target/all-feature Clippy passed. In the unoptimised timing diagnostics, 28,000 words had a 3.6 ms warm editor-frame median; a single 28,001-word wrapped paragraph measured 54 pages with a 3.6 ms warm median and a 705 ms edit/reflow. These measurements exclude GPU presentation and persistence I/O and are not release-build latency guarantees.
+The first exact-release run caught a separate PDF/DOCX command path still revealing the caret after export. Release publication was stopped. The post-command frame regression now covers both original export commands and every newer format; native PDF export is repeated on the corrected final executable.
+
+Local final source result: 257 library tests and 3 speech-worker tests passed; all four normally ignored diagnostics passed when run explicitly (264 total, zero failures). Formatting and strict all-target/all-feature Clippy passed. In the final unoptimised timing diagnostics, 28,000 words had a 4.4 ms warm editor-frame median; a single 28,001-word wrapped paragraph measured 54 pages with a 3.7 ms warm median and an 839 ms edit/reflow. These measurements exclude GPU presentation and persistence I/O and are not release-build latency guarantees.
 
 ## Verification boundaries
 
