@@ -2082,6 +2082,42 @@ fn save_and_all_exports_preserve_the_reading_viewport_and_document_selection() {
         assert_eq!(app.session.editor.caret, caret);
         assert_eq!(app.session.editor.doc, original);
     }
+    for theme in [Theme::Light, Theme::Dark] {
+        app.prefs.theme = theme;
+        for dialog in [
+            Dialog::Preferences,
+            Dialog::Help,
+            Dialog::About,
+            Dialog::Count,
+            Dialog::Rename,
+            Dialog::Message,
+            Dialog::ExportResult,
+            Dialog::Tool(tools::Tool::PersonalDictionary),
+            Dialog::Tool(tools::Tool::Notifications),
+            Dialog::Tool(tools::Tool::Accessibility),
+            Dialog::Tool(tools::Tool::Compare),
+            Dialog::Tool(tools::Tool::Translate),
+        ] {
+            app.dialog = Some(dialog);
+            image_frame(&ctx, &mut app, vec![]);
+            image_frame(&ctx, &mut app, vec![]);
+            image_frame(
+                &ctx,
+                &mut app,
+                vec![key(Key::Escape, egui::Modifiers::NONE)],
+            );
+            image_frame(&ctx, &mut app, vec![]);
+            image_frame(&ctx, &mut app, vec![]);
+            assert!(app.dialog.is_none());
+            let after = egui::scroll_area::State::load(&ctx, id).unwrap().offset;
+            assert!(
+                (after.y - before.y).abs() < 1.0,
+                "closing an informational dialog must retain the reading view in {theme:?}: {before:?} -> {after:?}"
+            );
+            assert_eq!(app.session.editor.caret, caret);
+            assert_eq!(app.session.editor.doc, original);
+        }
+    }
 }
 
 #[test]

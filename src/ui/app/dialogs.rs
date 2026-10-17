@@ -358,7 +358,21 @@ Dialog::Find=>{
 
             self.refocus = !self.home;
 
-            self.scroll_caret = true;
+            // Restore typing focus without moving a reader back to an
+            // offscreen selection after informational or preference dialogs.
+            if !matches!(
+                dialog,
+                Dialog::Preferences
+                    | Dialog::Help
+                    | Dialog::About
+                    | Dialog::Count
+                    | Dialog::Rename
+                    | Dialog::Message
+                    | Dialog::ExportResult
+                    | Dialog::Tool(_)
+            ) {
+                self.scroll_caret = true;
+            }
 
             #[cfg(not(test))]
             let _ = persistence::save_preferences(&self.prefs);

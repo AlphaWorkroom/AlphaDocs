@@ -1,4 +1,8 @@
-# AlphaDocs 0.1.5
+# AlphaDocs 0.1.6
+
+Closing Preferences after changing themes, Help, About, word count and other informational dialogs now retains your reading position and selection. Full editor frames verify the shared dialog-closing path in both themes.
+
+The fixes from 0.1.5 are included:
 
 This maintenance update fixes issues found in another native interaction QA pass:
 

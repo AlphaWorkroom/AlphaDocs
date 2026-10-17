@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6 — 17 October 2026
+
+- Closing Preferences after switching themes, Help, About, word count and other informational dialogs retains the reading viewport and document selection instead of jumping to an offscreen caret. Content-changing dialogs retain their existing caret navigation.
+- Full editor frames verify this behaviour in both themes, including personal dictionary, notification, accessibility, comparison and translation dialogs.
+
 ## 0.1.5 — 17 October 2026
 
 - Fixed fast horizontal scrollbar drags ending at the vertical scrollbar corner. The scrollbar receiving the press keeps pointer ownership; scrolling preserves the document selection.

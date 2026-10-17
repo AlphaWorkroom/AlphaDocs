@@ -1,6 +1,6 @@
 [package]
 name = "alphadocs"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 description = "AlphaDocs by Alpha Workroom — native document editor"
 authors = ["Alpha Workroom"]
