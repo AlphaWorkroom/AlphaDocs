@@ -257,6 +257,8 @@ impl AlphaDocs {
                 if let Some(available)=&self.update_state.available {
                     if let Some(error)=&available.install_error {ui.add_space(8.0);ui.label(error);}
                     ui.add_space(8.0);ui.label("The update is downloaded from Alpha Workroom's GitHub release, verified, installed and restarted. Your document library stays in place. Your operating system may request installation permission.");
+                    #[cfg(windows)]
+                    {ui.add_space(8.0);ui.label("On Windows, updates install in your user account. If you opened a portable copy, its folder is kept and the installed app opens instead. Use AlphaDocs in the Start menu afterwards.");}
                     if ui.link("View release notes on GitHub").clicked() && let Err(e)=open::that(&available.url){self.status=format!("Could not open your browser: {e}");}
                 }
                 ui.add_space(12.0);ui.label(RichText::new("Update requests contain release metadata only. No document text is uploaded. Automatic daily checks can be turned off in Preferences.").size(12.0).color(p.muted));
@@ -446,15 +448,33 @@ mod tests {
     #[test]
     fn download_modal_stays_within_viewport_in_both_themes() {
         for theme in [Theme::Light, Theme::Dark] {
-            let ctx = Context::default();
-            fonts::install(&ctx);
-            let mut app = busy_app(&ctx, theme);
-            update_frame(&ctx, &mut app, vec![], vec2(960.0, 640.0));
-            let rect = ctx
-                .data_mut(|d| d.get_temp::<Rect>(Id::new("update_modal")))
-                .expect("updater modal bounds");
-            assert!(rect.left() >= 0.0 && rect.right() <= 960.0, "{rect:?}");
-            assert!(rect.top() >= 0.0 && rect.bottom() <= 640.0, "{rect:?}");
+            for busy in [true, false] {
+                let ctx = Context::default();
+                fonts::install(&ctx);
+                let mut app = busy_app(&ctx, theme);
+                if !busy {
+                    app.update_state.phase = Phase::Idle;
+                    app.update_state.available = Some(crate::updates::Available {
+                    version: "99.0.0".into(),
+                    url: crate::updates::RELEASES.into(),
+                    asset: Some(crate::updates::ReleaseAsset {
+                        name: "AlphaDocs-Windows-x86_64-Setup.exe".into(),
+                        url: "https://github.com/AlphaWorkroom/AlphaDocs/releases/download/v99.0.0/AlphaDocs-Windows-x86_64-Setup.exe".into(),
+                        size: 100,
+                        sha256: "0".repeat(64),
+                    }),
+                    install_error: None,
+                });
+                    app.update_state.detail = "A new version is available.".into();
+                }
+                update_frame(&ctx, &mut app, vec![], vec2(960.0, 640.0));
+                update_frame(&ctx, &mut app, vec![], vec2(960.0, 640.0));
+                let rect = ctx
+                    .data_mut(|d| d.get_temp::<Rect>(Id::new("update_modal")))
+                    .expect("updater modal bounds");
+                assert!(rect.left() >= 0.0 && rect.right() <= 960.0, "{rect:?}");
+                assert!(rect.top() >= 0.0 && rect.bottom() <= 640.0, "{rect:?}");
+            }
         }
     }
 

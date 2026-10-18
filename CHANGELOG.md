@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8
+
+- Windows updates now accept portable and renamed app copies. The verified Setup installs into the normal per-user location, retains the source folder and relaunches the installed app.
+- The update window explains where portable copies are installed and how to launch the installed version afterwards.
+- Installer verification covers a fresh installation from a renamed portable source, alongside the existing installed-app update and working-directory regression.
+
 ## 0.1.7 — 18 October 2026
 
 - Added Select cell alongside Select row and Select column. Cell selection supports copying, formatting, clearing and Undo, including empty cells.

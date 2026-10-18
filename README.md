@@ -31,7 +31,7 @@ The Windows installer requires .NET Framework 4.8. Downloads include the app, it
 
 ## Features
 
-New in 0.1.7: whole-cell selection, clearer formula previews and an optional automatic table-recalculation setting in Preferences. See the [editor audit and compatibility limits](docs/EDITOR_COMPATIBILITY.md).
+New in 0.1.8: Windows updates also support portable and renamed copies, installing into the normal per-user folder while retaining the original copy. See the [editor audit and compatibility limits](docs/EDITOR_COMPATIBILITY.md).
 
 
 ### Multiple documents. One window.

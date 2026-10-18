@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -190,6 +191,34 @@ internal sealed class Setup : Form {
             throw new IOException("Update verification did not retain the previous payload.");
         ValidatePayload(Path.Combine(backup, "AlphaDocs.exe"), setup.verificationDataDirectory);
         ValidatePayload(Path.Combine(destination, "AlphaDocs.exe"), setup.verificationDataDirectory);
+        // A GitHub portable/renamed client must also be able to hand off to a
+        // fresh managed installation without changing its source directory.
+        var portableSource = destination + ".portable-source";
+        var freshDestination = destination + ".portable-install";
+        if (Directory.Exists(portableSource) || Directory.Exists(freshDestination))
+            throw new IOException("Portable verification targets must be new.");
+        Extract(portableSource);
+        var original = Path.Combine(portableSource, "AlphaDocs.exe");
+        var renamed = Path.Combine(portableSource, "AlphaDocs-Portable.exe");
+        File.Move(original, renamed);
+        var originalHash = FileDigest(renamed);
+        var fresh = new Setup(freshDestination, true);
+        Environment.CurrentDirectory = portableSource;
+        var portableStart = new ProcessStartInfo(renamed, "--self-check") { UseShellExecute = false, CreateNoWindow = true };
+        portableStart.EnvironmentVariables["ALPHADOCS_DATA_DIR"] = fresh.verificationDataDirectory;
+        using (var oldProcess = Process.Start(portableStart)) {
+            if (oldProcess == null) throw new IOException("Could not start isolated portable installation.");
+            fresh.Update(oldProcess.Id, freshDestination + ".update.log");
+            if (!oldProcess.WaitForExit(120000) || oldProcess.ExitCode != 0) throw new IOException("Portable native self-check failed.");
+        }
+        if (fresh.previousInstall != null || !Directory.Exists(portableSource)
+            || FileDigest(renamed) != originalHash)
+            throw new IOException("Portable update changed the original copy.");
+        ValidatePayload(Path.Combine(freshDestination, "AlphaDocs.exe"), fresh.verificationDataDirectory);
+    }
+    static string FileDigest(string path) {
+        using (var hash = SHA256.Create())
+        using (var input = File.OpenRead(path)) return Convert.ToBase64String(hash.ComputeHash(input));
     }
     static void ReleaseInstallDirectory(string installation) {
         var safe = Path.GetFullPath(Path.GetTempPath());

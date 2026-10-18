@@ -418,6 +418,17 @@ fn verify_staged_asset(
 
 #[cfg(target_os = "windows")]
 fn validate_install_layout(current_exe: &Path, asset: &ReleaseAsset) -> Result<(), DownloadError> {
+    let local = std::env::var_os("LOCALAPPDATA")
+        .ok_or_else(|| "Could not locate your Windows application-data folder".to_owned())?;
+    validate_windows_update_source(current_exe, asset, Path::new(&local))
+}
+
+#[cfg(target_os = "windows")]
+fn validate_windows_update_source(
+    current_exe: &Path,
+    asset: &ReleaseAsset,
+    local: &Path,
+) -> Result<(), DownloadError> {
     if asset.name != "AlphaDocs-Windows-x86_64-Setup.exe" {
         return Err(
             "This Windows installer does not match the running application"
@@ -425,12 +436,12 @@ fn validate_install_layout(current_exe: &Path, asset: &ReleaseAsset) -> Result<(
                 .into(),
         );
     }
-    let local = std::env::var_os("LOCALAPPDATA")
-        .ok_or_else(|| "Could not locate the per-user AlphaDocs installation".to_owned())?;
-    let expected = PathBuf::from(local).join("Programs/AlphaDocs/AlphaDocs.exe");
-    if !same_path(current_exe, &expected) {
-        return Err("Automatic Windows updates support the per-user AlphaDocs installation only. Install with AlphaDocs Setup first.".to_owned().into());
+    if !local.is_absolute() || !current_exe.is_absolute() || !current_exe.is_file() {
+        return Err("Could not resolve the running Windows application or installation destination. No files were changed.".to_owned().into());
     }
+    // Setup always targets LOCALAPPDATA/Programs/AlphaDocs. A portable or
+    // renamed executable is a valid source, not an arbitrary replacement
+    // destination. Its original folder and the document library are retained.
     Ok(())
 }
 
@@ -625,6 +636,7 @@ fn make_private_directory(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(any(not(windows), test))]
 fn same_path(left: &Path, right: &Path) -> bool {
     #[cfg(windows)]
     {
@@ -636,7 +648,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
     }
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, test))]
 fn normalize_windows_path(path: &Path) -> String {
     let normalized = path.to_string_lossy().replace('/', "\\");
     let normalized = normalized
@@ -690,6 +702,34 @@ mod tests {
             command.get_args().collect::<Vec<_>>(),
             ["--update", "123", update.log.to_str().unwrap(), "--dark"]
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_update_accepts_installed_portable_and_renamed_sources() {
+        let dir = temporary_dir();
+        let local = dir.join("Local");
+        let mut installer = asset(b"verified separately");
+        installer.name = "AlphaDocs-Windows-x86_64-Setup.exe".into();
+        for relative in [
+            "Local/Programs/AlphaDocs/AlphaDocs.exe",
+            "Downloads/AlphaDocs/AlphaDocs.exe",
+            "qa/native/AlphaDocs-QA.exe",
+        ] {
+            let source = dir.join(relative);
+            fs::create_dir_all(source.parent().unwrap()).unwrap();
+            fs::write(&source, b"unchanged original").unwrap();
+            assert!(validate_windows_update_source(&source, &installer, &local).is_ok());
+            assert_eq!(fs::read(&source).unwrap(), b"unchanged original");
+        }
+        let source = dir.join("qa/native/AlphaDocs-QA.exe");
+        assert!(validate_windows_update_source(&source, &installer, Path::new("")).is_err());
+        assert!(
+            validate_windows_update_source(&dir.join("missing.exe"), &installer, &local).is_err()
+        );
+        installer.name = "AlphaDocs-macOS-aarch64.dmg".into();
+        assert!(validate_windows_update_source(&source, &installer, &local).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     fn temporary_dir() -> PathBuf {

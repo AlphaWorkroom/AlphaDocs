@@ -1,9 +1,7 @@
-# AlphaDocs 0.1.7
+# AlphaDocs 0.1.8
 
-- Added **Select cell** beside Select row and Select column in table menus. Copy, format or clear a complete cell, including an empty one.
-- Table calculation commands are grouped near the top of the context menu.
-- Formula dialogs show the target cell and a result preview. Suggested sums follow the nearby numbers, including rows beneath an empty header.
-- Added **Preferences → General → Automatically recalculate table formulas**. Enable it to update results as table values change; Undo restores the input and its results together. The option is off by default.
-- Invalid calculation inputs preserve cached results and display a message. **Recalculate table** remains available for manual updates.
+- Fixed Windows in-app updates rejecting portable or renamed copies downloaded from GitHub. Updates install into the standard per-user AlphaDocs folder and relaunch the installed app; the original portable folder is retained.
+- The update window explains the installation destination and directs portable users to the Start-menu app afterwards.
+- Added regression checks for installed, portable and renamed clients, including a fresh installation from a portable copy.
 
-For numbers side by side, use `=SUM(LEFT)`. For numbers in a column, use `=SUM(ABOVE)`.
+Versions 0.1.6 and 0.1.7 contain the old folder restriction. If one of those versions shows “Install with AlphaDocs Setup first”, download and run the Windows Setup once, then open AlphaDocs from the Start menu. The document library stays in place.
