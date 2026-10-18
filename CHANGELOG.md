@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.1.8.1
+## 0.1.9
 
 - Fixed recent-document cards extending beyond the homepage instead of wrapping into rows. Templates also reserve their full width before wrapping.
 - Kept centred content within its available width during window resizing.
-- Added numeric four-part patch version support to the application, updater, native resources and release packaging. Older clients need a manual download for this patch because they only parse three-part release numbers.
+- Uses a standard three-part release number so existing updaters can recognise this release.
 
 ## 0.1.8
 
