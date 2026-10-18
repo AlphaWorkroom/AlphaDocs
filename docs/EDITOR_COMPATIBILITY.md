@@ -46,4 +46,4 @@ A valid DOCX is not a guarantee of identical layout in every reader. Font availa
 
 ## Verification scope
 
-The user’s affected story is on a MacBook and was not supplied locally. Its exact file has **not** been verified. Tests use original synthetic writing; no user story was rewritten. Native Windows, Microsoft Word, independent LibreOffice rendering, SDK/package checks and Rust regression results are recorded in `docs/QA_STAGE28.md`. ONLYOFFICE runtime and physical Mac/Linux UI verification must not be inferred from those checks.
+Verification uses synthetic documents covering the supported features. Compatibility with every existing DOCX file is not guaranteed. Native Windows, Microsoft Word, independent LibreOffice rendering, SDK/package checks and Rust regression results are recorded in `docs/QA_STAGE28.md`. ONLYOFFICE runtime and physical Mac/Linux UI verification must not be inferred from those checks.

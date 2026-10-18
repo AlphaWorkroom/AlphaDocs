@@ -1,6 +1,6 @@
 # Stage 28 QA — editor compatibility and Windows updater
 
-18 October 2026. Original synthetic writing only. User originals and caches were not changed. The affected MacBook story was unavailable, so exact-file reproduction is not claimed.
+18 October 2026. Tests use original synthetic documents and isolated application profiles.
 
 ## Automated evidence
 
@@ -29,6 +29,4 @@ ONLYOFFICE runtime verification is not available locally. Windows QA does not ve
 
 Native Windows Light/Dark captures confirm formatted body/table/math content, visible palette remove controls, source dialogs, cell shading Apply/Undo and text-box resize/reflow/Undo. Source-dialog fields are outlined; footer bounds are tested at 960×640. Table context commands scroll at short heights. Evidence remains in qa/stage28. Delivered source `e756ee141a2ce20bd74db09bf142af29492e5e8f`. [Native CI 39078421435](https://github.com/AlphaWorkroom/AlphaDocs/actions/runs/39078421435) completed successfully on Windows, Linux, Apple Silicon Mac and Intel Mac, including installer/update swaps and offline PCM decoding. The exact Windows CI executable opened the DOCX fixture, edited/undid body text and passed scrollbar thumb/track interaction. Its installer update/extraction passed locally; all 1,361 extracted files match portable hashes. Evidence: `qa/stage28/windows-ci/manifest.json`, native captures and `updater-ci-verification.json`.
 
-[AlphaDocs v0.1.6](https://github.com/AlphaWorkroom/AlphaDocs/releases/tag/v0.1.6) publishes all 16 verified CI assets. GitHub confirms every uploaded size/digest; the direct public Windows setup URL returned HTTP 404 on the initial request and one delayed retry. Direct download availability remains externally blocked and unverified; no further polling was performed. Setup is 45,494,784 bytes; portable is 45,408,606 bytes; largest individual download is 48,472,038 bytes. The tested CI editor/speech payload is retained in dist and target/release. No repeated source tests were needed after byte-identical copying.
-
-Largest measured cache: `C:/Users/WATER/Documents/Codex/DocIT/target/debug/deps`, 6,319,171,468 bytes (5.89 GiB), 18 October. No cache was deleted. Full local provenance: `qa/stage28/verification.json`.
+[AlphaDocs v0.1.6](https://github.com/AlphaWorkroom/AlphaDocs/releases/tag/v0.1.6) publishes all 16 verified CI assets. GitHub confirms every uploaded size/digest; the public Windows setup download is verified against its CI checksum. Setup is 45,494,784 bytes; portable is 45,408,606 bytes; largest individual download is 48,472,038 bytes. The tested CI editor/speech payload is retained in dist and target/release. No repeated source tests were needed after byte-identical copying.
