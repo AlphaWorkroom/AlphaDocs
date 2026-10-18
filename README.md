@@ -31,7 +31,7 @@ The Windows installer requires .NET Framework 4.8. Downloads include the app, it
 
 ## Features
 
-New in 0.1.9: recent-document cards wrap neatly within the homepage, including after resizing. See the [editor audit and compatibility limits](docs/EDITOR_COMPATIBILITY.md).
+New in 0.1.10: recent-document cards wrap neatly within the homepage, including after resizing. See the [editor audit and compatibility limits](docs/EDITOR_COMPATIBILITY.md).
 
 
 ### Multiple documents. One window.

@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.1.9
+## 0.1.10
+
+- Includes the homepage card-wrapping correction from the unpublished 0.1.9 build.
+- New documents use random 128-bit IDs rather than timestamps, preventing identity and library-path collisions when documents are created within the same clock tick.
+
+## 0.1.9 (unpublished)
 
 - Fixed recent-document cards extending beyond the homepage instead of wrapping into rows. Templates also reserve their full width before wrapping.
 - Kept centred content within its available width during window resizing.

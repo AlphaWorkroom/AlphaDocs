@@ -17,6 +17,27 @@ pub const DOCUMENT_VERSION: u32 = 11;
 mod storage_tests {
     use super::*;
     #[test]
+    fn rapid_parallel_document_creation_has_distinct_valid_ids() {
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    (0..256)
+                        .map(|_| Document::new("Rapid creation").id)
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let ids: Vec<_> = workers
+            .into_iter()
+            .flat_map(|worker| worker.join().unwrap())
+            .collect();
+        assert!(ids.iter().all(|id| Document::valid_id(id)));
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            1024
+        );
+    }
+    #[test]
     fn legacy_arrays_and_new_field_defaults_load_without_migration() {
         let json = r#"{"version":1,"id":"legacy-test","title":"Old document","starred":false,"blocks":[{"Paragraph":{"chars":[{"ch":"é","style":{}}]}}],"page":{"paper":"A4","landscape":false,"margins":[72,72,72,72],"color":[255,255,255],"page_numbers":false}}"#;
         let doc: Document = serde_json::from_str(json).unwrap();
@@ -625,13 +646,9 @@ impl Document {
     pub fn new(title: &str) -> Self {
         Self {
             version: DOCUMENT_VERSION,
-            id: format!(
-                "{:x}",
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            ),
+            // Clock resolution varies by platform. Time alone can give rapidly
+            // created documents the same UI identity and library save path.
+            id: format!("{:032x}", rand::random::<u128>()),
             title: title.into(),
             blocks: vec![Block::Paragraph(Paragraph::default())],
             page: PageSetup::default(),
