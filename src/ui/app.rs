@@ -1643,30 +1643,16 @@ impl AlphaDocs {
         }
     }
     fn table_commands(&mut self, ui: &mut Ui) {
-        if table_commands(ui, &mut self.session.editor, self.session.viewing) {
+        if table_menu(
+            ui,
+            &mut self.session.editor,
+            self.session.viewing,
+            &mut self.table_format_draft,
+            &mut self.dialog,
+            &mut self.status,
+        ) {
             self.refocus = true;
             self.scroll_caret = true;
-        }
-        if menu(
-            ui,
-            "Cell background and borders…",
-            "",
-            !self.session.viewing,
-        ) {
-            self.table_format_draft = Some(table_controls::FormatDraft::new(&self.session.editor));
-            self.dialog = Some(Dialog::TableFormat);
-        }
-        if menu(ui, "Formula…", "", !self.session.viewing) {
-            self.table_format_draft = Some(table_controls::FormatDraft::new(&self.session.editor));
-            self.dialog = Some(Dialog::TableFormula);
-        }
-        if menu(ui, "Recalculate table", "", !self.session.viewing) {
-            self.status = self
-                .session
-                .editor
-                .recalculate_table()
-                .map(|()| "Table calculations updated".into())
-                .unwrap_or_else(|e| e);
         }
     }
     fn table_picker(&mut self, ui: &mut Ui) {
@@ -3152,32 +3138,16 @@ impl AlphaDocs {
                                 .get(self.session.editor.caret.address.block),
                             Some(Block::Table(_))
                         ) {
-                            if table_commands(ui, &mut self.session.editor, self.session.viewing) {
+                            if table_menu(
+                                ui,
+                                &mut self.session.editor,
+                                self.session.viewing,
+                                &mut self.table_format_draft,
+                                &mut self.dialog,
+                                &mut self.status,
+                            ) {
                                 self.refocus = true;
                                 self.scroll_caret = true;
-                            }
-                            if menu(
-                                ui,
-                                "Cell background and borders…",
-                                "",
-                                !self.session.viewing,
-                            ) {
-                                self.table_format_draft =
-                                    Some(table_controls::FormatDraft::new(&self.session.editor));
-                                self.dialog = Some(Dialog::TableFormat);
-                            }
-                            if menu(ui, "Formula…", "", !self.session.viewing) {
-                                self.table_format_draft =
-                                    Some(table_controls::FormatDraft::new(&self.session.editor));
-                                self.dialog = Some(Dialog::TableFormula);
-                            }
-                            if menu(ui, "Recalculate table", "", !self.session.viewing) {
-                                self.status = self
-                                    .session
-                                    .editor
-                                    .recalculate_table()
-                                    .map(|()| "Table calculations updated".into())
-                                    .unwrap_or_else(|e| e);
                             }
                             ui.separator();
                         }
@@ -3520,6 +3490,9 @@ impl AlphaDocs {
         // Collaboration projection is remote work. Track only later revisions as
         // local edits so remote changes stay recoverable without moving the idle timer.
         let revision_before_local_ui = self.autosave_revision();
+        self.session.editor.set_auto_recalculate_tables(
+            self.prefs.auto_recalculate_tables && !self.session.viewing,
+        );
         self.poll_voice(ui.ctx());
         self.poll_paste(ui.ctx());
         let ctx = ui.ctx().clone();
@@ -3600,6 +3573,9 @@ impl AlphaDocs {
             self.execute(Action::Open, &ctx);
         }
         self.sync_image_selection();
+        self.session.editor.set_auto_recalculate_tables(
+            self.prefs.auto_recalculate_tables && !self.session.viewing,
+        );
         self.input(&ctx);
         if self.view_tab_id != self.session.editor.doc.tabs[self.session.editor.doc.active_tab].id {
             self.reset_document_view();
@@ -3629,6 +3605,15 @@ impl AlphaDocs {
         chrome::resize_edges(ui);
         if self.refocus && self.dialog.is_none() {
             ctx.request_repaint();
+        }
+        if let Some(result) = self.session.editor.take_table_calculation_result() {
+            match result {
+                Err(error) => self.status = format!("Table calculations paused: {error}"),
+                Ok(()) if self.status.starts_with("Table calculations paused:") => {
+                    self.status = "Table calculations updated".into()
+                }
+                Ok(()) => {}
+            }
         }
         let now = self.autosave_now();
         if Self::local_revision_changed(&revision_before_local_ui, &self.autosave_revision()) {
@@ -3741,17 +3726,55 @@ fn truncate(t: &str, n: usize) -> String {
     }
     s
 }
-fn table_commands(ui: &mut Ui, editor: &mut crate::engine::Editor, viewing: bool) -> bool {
+fn table_menu(
+    ui: &mut Ui,
+    editor: &mut crate::engine::Editor,
+    viewing: bool,
+    draft: &mut Option<table_controls::FormatDraft>,
+    dialog: &mut Option<Dialog>,
+    status: &mut String,
+) -> bool {
+    let selected = table_selection_commands(ui, editor);
+    ui.separator();
+    if menu(ui, "Formula…", "", !viewing) {
+        *draft = Some(table_controls::FormatDraft::new(editor));
+        *dialog = Some(Dialog::TableFormula);
+    }
+    if menu(ui, "Recalculate table", "", !viewing) {
+        *status = editor
+            .recalculate_table()
+            .map(|()| "Table calculations updated".into())
+            .unwrap_or_else(|e| e);
+    }
+    if menu(ui, "Cell background and borders…", "", !viewing) {
+        *draft = Some(table_controls::FormatDraft::new(editor));
+        *dialog = Some(Dialog::TableFormat);
+    }
+    ui.separator();
+    let structured = table_structure_commands(ui, editor, viewing);
+    selected || structured
+}
+fn table_selection_commands(ui: &mut Ui, editor: &mut crate::engine::Editor) -> bool {
     let mut changed = false;
     let address = editor.caret.address;
     let table = matches!(editor.doc.blocks.get(address.block), Some(Block::Table(_)));
+    if menu(ui, "Select cell", "", table) {
+        changed |= editor.select_table_cell(address);
+    }
     if menu(ui, "Select row", "", table) {
         changed |= editor.select_table_row(address.block, address.row);
     }
     if menu(ui, "Select column", "", table) {
         changed |= editor.select_table_column(address.block, address.cell);
     }
-    ui.separator();
+    changed
+}
+fn table_structure_commands(
+    ui: &mut Ui,
+    editor: &mut crate::engine::Editor,
+    viewing: bool,
+) -> bool {
+    let mut changed = false;
     for (label, operation) in [
         ("Insert row above", 0),
         ("Insert row below", 1),
@@ -3789,8 +3812,10 @@ fn menu_width(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool, width: f3
         .inner;
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     #[cfg(test)]
-    ui.ctx()
-        .data_mut(|d| d.insert_temp(Id::new(("menu_bounds", label)), rect));
+    ui.ctx().data_mut(|d| {
+        d.insert_temp(Id::new(("menu_clip", label)), ui.clip_rect());
+        d.insert_temp(Id::new(("menu_bounds", label)), rect)
+    });
     if r.hovered() && enabled {
         ui.painter()
             .rect_filled(rect, 2.0, ui.visuals().widgets.hovered.weak_bg_fill);

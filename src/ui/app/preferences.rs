@@ -54,6 +54,14 @@ impl AlphaDocs {
                     ui.label(RichText::new(if self.prefs.autosave {"Saves locally after 30 seconds without editing. Each edit restarts the wait, so autosave stays out of the way while you type."}else{"Autosave is off. Use Save to keep your work. Closing or switching documents still saves them locally."}).size(12.0).color(p.muted));
                 });
                 ui.add_space(14.0);
+                Frame::new().fill(p.toolbar).corner_radius(12).inner_margin(14).show(ui,|ui|{
+                    ui.label(RichText::new("Table calculations").strong().size(16.0));
+                    let r=checkbox(ui,&mut self.prefs.auto_recalculate_tables,"Automatically recalculate table formulas",p);
+                    #[cfg(test)] ui.ctx().data_mut(|d|d.insert_temp(Id::new("table_calculation_preference_bounds"),r.rect));
+                    #[cfg(not(test))] let _=r;
+                    ui.label(RichText::new("Updates results as you edit table values. Undo restores the edited value and its results together. When off, use Recalculate table from the cell menu.").size(12.0).color(p.muted));
+                });
+                ui.add_space(14.0);
                 ui.label("Appearance");ui.horizontal(|ui|{for (t,label) in [(Theme::System,"System"),(Theme::Light,"Light"),(Theme::Dark,"Dark")] {ui.radio_value(&mut self.prefs.theme,t,label);}});
                 checkbox(ui,&mut self.prefs.outline,"Show document outline",p);
                 checkbox(ui,&mut self.prefs.ruler,"Show ruler",p);

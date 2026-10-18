@@ -455,3 +455,142 @@ fn table_cell_selection_does_not_create_zero_length_text_annotations() {
                 .is_none_or(|paragraph| paragraph.annotations.is_empty()))
     );
 }
+
+#[test]
+fn table_formula_direction_cell_selection_and_optional_recalculation_use_real_frames() {
+    for theme in [Theme::Light, Theme::Dark] {
+        let blocks = vec![Block::Table(vec![
+            vec![Paragraph::default(); 3],
+            vec![
+                Paragraph::from_text("10"),
+                Paragraph::from_text("20"),
+                Paragraph::default(),
+            ],
+        ])];
+        let (context, mut app) = app_with_blocks(blocks);
+        app.prefs.theme = theme;
+        settle(&context, &mut app);
+        context_click_cell(&context, &mut app, 1, 2);
+        choose_context_command(&context, &mut app, "Formula…");
+        click(
+            &context,
+            &mut app,
+            bounds(&context, "table_calculate_bounds"),
+        );
+        settle(&context, &mut app);
+        let address = Address {
+            block: 0,
+            row: 1,
+            cell: 2,
+        };
+        let p = app.session.editor.doc.paragraph(address).unwrap();
+        assert_eq!(p.text(), "30");
+        assert_eq!(p.formula.as_ref().unwrap().expression, "=SUM(LEFT)");
+        let original = app.session.editor.doc.clone();
+        let revision = app.session.editor.revision;
+        app.dialog = Some(Dialog::Preferences);
+        settle(&context, &mut app);
+        click(
+            &context,
+            &mut app,
+            bounds(&context, "table_calculation_preference_bounds"),
+        );
+        settle(&context, &mut app);
+        assert!(app.prefs.auto_recalculate_tables);
+        assert_eq!(app.session.editor.revision, revision);
+        frame(
+            &context,
+            &mut app,
+            vec![key(Key::Escape, egui::Modifiers::NONE)],
+        );
+        settle(&context, &mut app);
+        context_click_cell(&context, &mut app, 1, 1);
+        choose_context_command(&context, &mut app, "Select cell");
+        assert_eq!(app.session.editor.selected_text(), "20");
+        frame(&context, &mut app, vec![Event::Text("40".into())]);
+        settle(&context, &mut app);
+        assert_eq!(
+            app.session.editor.doc.paragraph(address).unwrap().text(),
+            "50"
+        );
+        frame(
+            &context,
+            &mut app,
+            vec![key(Key::Z, egui::Modifiers::COMMAND)],
+        );
+        settle(&context, &mut app);
+        assert_eq!(app.session.editor.doc, original);
+        app.dialog = Some(Dialog::Preferences);
+        settle(&context, &mut app);
+        click(
+            &context,
+            &mut app,
+            bounds(&context, "table_calculation_preference_bounds"),
+        );
+        settle(&context, &mut app);
+        assert!(!app.prefs.auto_recalculate_tables);
+        let encoded = serde_json::to_vec(&app.prefs).unwrap();
+        let loaded: Preferences = serde_json::from_slice(&encoded).unwrap();
+        assert!(!loaded.auto_recalculate_tables);
+        frame(
+            &context,
+            &mut app,
+            vec![key(Key::Escape, egui::Modifiers::NONE)],
+        );
+        settle(&context, &mut app);
+        context_click_cell(&context, &mut app, 1, 1);
+        choose_context_command(&context, &mut app, "Select cell");
+        frame(&context, &mut app, vec![Event::Text("40".into())]);
+        settle(&context, &mut app);
+        assert_eq!(
+            app.session.editor.doc.paragraph(address).unwrap().text(),
+            "30"
+        );
+        assert_eq!(
+            app.session
+                .editor
+                .doc
+                .paragraph(Address {
+                    block: 0,
+                    row: 1,
+                    cell: 1
+                })
+                .unwrap()
+                .text(),
+            "40"
+        );
+        context_click_cell(&context, &mut app, 1, 2);
+        let command = bounds(&context, ("menu_bounds", "Recalculate table"));
+        let clip = bounds(&context, ("menu_clip", "Recalculate table"));
+        assert!(
+            clip.contains(command.center()),
+            "Recalculate table outside clip: {command:?} clip={clip:?}"
+        );
+        choose_context_command(&context, &mut app, "Recalculate table");
+        assert_eq!(
+            app.session.editor.doc.paragraph(address).unwrap().text(),
+            "50",
+            "status={} caret={:?} menu={:?} open={}",
+            app.status,
+            app.session.editor.caret,
+            bounds(&context, ("menu_bounds", "Recalculate table")),
+            egui::Popup::is_any_open(&context)
+        );
+        app.session.viewing = true;
+        context_click_cell(&context, &mut app, 0, 0);
+        choose_context_command(&context, &mut app, "Select cell");
+        assert_eq!(
+            app.session.editor.selected_table_cell_addresses(),
+            [Address {
+                block: 0,
+                row: 0,
+                cell: 0
+            }]
+        );
+        let before = app.session.editor.doc.clone();
+        frame(&context, &mut app, vec![Event::Text("blocked".into())]);
+        assert_eq!(app.session.editor.doc, before);
+    }
+    let legacy: Preferences = serde_json::from_str("{}").unwrap();
+    assert!(!legacy.auto_recalculate_tables);
+}

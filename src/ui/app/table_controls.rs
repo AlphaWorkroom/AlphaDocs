@@ -43,12 +43,14 @@ impl FormatDraft {
                 .paragraph(editor.caret.address)
                 .and_then(|p| p.formula.as_ref())
                 .map(|f| f.expression.clone())
-                .unwrap_or_else(|| {
-                    if editor.caret.address.row > 0 {
-                        "=SUM(ABOVE)".into()
-                    } else {
-                        "=SUM(LEFT)".into()
-                    }
+                .unwrap_or_else(|| match editor.doc.blocks.get(editor.caret.address.block) {
+                    Some(Block::Table(rows)) => crate::table_formula::suggested_formula(
+                        rows,
+                        editor.caret.address.row,
+                        editor.caret.address.cell,
+                    )
+                    .into(),
+                    _ => "=SUM(LEFT)".into(),
                 }),
             decimals: editor
                 .doc
@@ -79,9 +81,10 @@ impl AlphaDocs {
         };
         ui.label(RichText::new("Table formula").size(24.0));
         ui.add_space(12.0);
-        ui.label(
-            "Calculate a value in the current cell. This replaces its text; Undo restores it.",
-        );
+        ui.label(format!(
+            "Calculate in cell {}. This replaces its text; Undo restores it.",
+            crate::table_formula::cell_name(draft.caret.address.row, draft.caret.address.cell)
+        ));
         ui.add_space(16.0);
         ui.label("Formula");
         editable_object_ui::outlined(ui, self.palette, |ui| {
@@ -92,6 +95,42 @@ impl AlphaDocs {
             );
         });
         ui.add_space(8.0);
+        if draft.current(&self.session.editor)
+            && let Some(Block::Table(rows)) = self
+                .session
+                .editor
+                .doc
+                .blocks
+                .get(draft.caret.address.block)
+        {
+            match crate::table_formula::evaluate(
+                rows,
+                draft.caret.address.row,
+                draft.caret.address.cell,
+                &draft.formula,
+            ) {
+                Ok(value) => {
+                    ui.label(
+                        RichText::new(format!(
+                            "Result: {}",
+                            crate::table_formula::formatted(value, draft.decimals)
+                        ))
+                        .strong()
+                        .color(self.palette.accent),
+                    );
+                }
+                Err(error) => {
+                    ui.label(RichText::new(error).color(self.palette.muted));
+                }
+            }
+        }
+        ui.label(
+            RichText::new(
+                "SUM(LEFT) adds numbers in this row. SUM(ABOVE) adds numbers in this column.",
+            )
+            .color(self.palette.muted)
+            .size(12.0),
+        );
         ui.label(RichText::new("Examples: =SUM(ABOVE), =A2*B2, =AVERAGE(A1:A4)\nSUM, PRODUCT, AVERAGE, COUNT, MIN, MAX, ABS, INT, ROUND. Use + − * / ^ and parentheses.").color(self.palette.muted).size(12.0));
         ui.add_space(12.0);
         egui::ComboBox::from_label("Number format")
@@ -112,7 +151,7 @@ impl AlphaDocs {
                 }
             });
         ui.add_space(12.0);
-        ui.label(RichText::new("After changing source numbers, choose Recalculate table. Typing into a calculated cell replaces its formula.").color(self.palette.muted).size(12.0));
+        ui.label(RichText::new(if self.prefs.auto_recalculate_tables {"Automatic recalculation is on. Typing into a calculated cell replaces its formula."}else{"Automatic recalculation is off. Choose Recalculate table after changing numbers, or enable it in Preferences. Typing into a calculated cell replaces its formula."}).color(self.palette.muted).size(12.0));
         if !draft.error.is_empty() {
             ui.add_space(12.0);
             ui.colored_label(self.palette.text, &draft.error);
@@ -122,16 +161,18 @@ impl AlphaDocs {
             vec2(ui.available_width(), 40.0),
             UiLayout::right_to_left(Align::Center),
             |ui| {
-                if primary(
+                let calculate = primary(
                     ui,
                     "Calculate",
                     self.palette,
                     draft.current(&self.session.editor)
                         && !self.session.viewing
                         && !draft.formula.trim().is_empty(),
-                )
-                .clicked()
-                {
+                );
+                #[cfg(test)]
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(Id::new("table_calculate_bounds"), calculate.rect));
+                if calculate.clicked() {
                     match self.session.editor.set_table_formula(TableFormula {
                         expression: draft.formula.trim().into(),
                         decimals: draft.decimals,

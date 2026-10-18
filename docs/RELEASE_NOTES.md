@@ -1,14 +1,9 @@
-# AlphaDocs 0.1.6
+# AlphaDocs 0.1.7
 
-- Fixed DOCX imports replacing bordered paragraphs with horizontal lines and losing their text. Paragraph borders, shading and editable content now survive supported Word round trips.
-- Fixed Windows updates failing because the installer kept the installation folder in use.
-- Added visible delete buttons for saved custom colours.
-- Added table cell, row and column backgrounds, border colours and border widths.
-- Added table formulas with cell references, ranges and common calculation functions, plus undoable table recalculation.
-- Added editable equations, text boxes, rectangles, ellipses, lines and arrows, with text formatting, positioning and resizing.
-- Improved Word equation and shape compatibility, horizontal-line geometry and symbol rendering inside text boxes.
-- Fixed informational dialogs moving the document away from the current reading position.
+- Added **Select cell** beside Select row and Select column in table menus. Copy, format or clear a complete cell, including an empty one.
+- Table calculation commands are grouped near the top of the context menu.
+- Formula dialogs show the target cell and a result preview. Suggested sums follow the nearby numbers, including rows beneath an empty header.
+- Added **Preferences → General → Automatically recalculate table formulas**. Enable it to update results as table values change; Undo restores the input and its results together. The option is off by default.
+- Invalid calculation inputs preserve cached results and display a message. **Recalculate table** remains available for manual updates.
 
-DOCX exports use editable Word formula fields, Office Math and standard shapes; PDF exports preserve vector graphics. [Compatibility and supported formats](https://github.com/AlphaWorkroom/AlphaDocs/blob/main/docs/EDITOR_COMPATIBILITY.md).
-
-Both devices must update to this version to collaborate on documents containing editable equations and shapes.
+For numbers side by side, use `=SUM(LEFT)`. For numbers in a column, use `=SUM(ABOVE)`.

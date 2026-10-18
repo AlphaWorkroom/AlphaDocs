@@ -24,12 +24,13 @@ struct Snapshot {
     anchor: Position,
 }
 
-/// A transient selection of a table's complete row or column.
+/// A transient selection of a complete table cell, row or column.
 ///
 /// This is separate from the scalar text selection held by `Editor::caret` and
 /// `Editor::anchor`, so selecting cells does not change text-editing semantics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TableSelection {
+    Cell(Address),
     Row { block: usize, row: usize },
     Column { block: usize, column: usize },
 }
@@ -81,6 +82,8 @@ pub struct Editor {
     last_insert: Option<(Instant, Position, TextStyle)>,
     tab_selections: std::collections::HashMap<String, (Position, Position)>,
     table_selection: Option<TableSelection>,
+    auto_recalculate_tables: bool,
+    table_calculation_result: Option<Result<(), String>>,
     collaboration: Option<shared::SharedEditor>,
 }
 impl Editor {
@@ -99,6 +102,8 @@ impl Editor {
             last_insert: None,
             tab_selections: Default::default(),
             table_selection: None,
+            auto_recalculate_tables: false,
+            table_calculation_result: None,
             collaboration: None,
         };
         editor.sync_style();
@@ -274,6 +279,7 @@ impl Editor {
         let caret = self.caret;
         let anchor = self.anchor;
         f(self);
+        self.refresh_changed_table_calculations(&old);
         if self.doc != old {
             self.table_selection = None;
             if let Some(shared) = self.collaboration.as_mut() {
@@ -358,6 +364,11 @@ impl Editor {
     }
     fn table_cell_addresses_for(&self, selection: TableSelection) -> Vec<Address> {
         match selection {
+            TableSelection::Cell(address) => self
+                .doc
+                .paragraph(address)
+                .map(|_| vec![address])
+                .unwrap_or_default(),
             TableSelection::Row { block, row } => {
                 let Some(Block::Table(rows)) = self.doc.blocks.get(block) else {
                     return vec![];
@@ -393,6 +404,17 @@ impl Editor {
             && !self.table_cell_addresses_for(selection).is_empty()
         {
             self.table_selection = Some(selection);
+        }
+    }
+    /// Select the whole cell, including its empty rectangle, for copy/format/clear.
+    pub fn select_table_cell(&mut self, address: Address) -> bool {
+        if matches!(self.doc.blocks.get(address.block), Some(Block::Table(_)))
+            && self.doc.paragraph(address).is_some()
+        {
+            self.table_selection = Some(TableSelection::Cell(address));
+            true
+        } else {
+            false
         }
     }
     /// Select a complete row without changing the scalar text caret or anchor.
@@ -433,6 +455,11 @@ impl Editor {
         let addresses = self.table_cell_addresses_for(selection);
         let mut lines = Vec::new();
         match selection {
+            TableSelection::Cell(address) => lines.push(
+                self.doc
+                    .paragraph(address)
+                    .map_or_else(String::new, Paragraph::text),
+            ),
             TableSelection::Row { .. } => {
                 lines.push(
                     addresses
@@ -598,6 +625,7 @@ impl Editor {
         self.sync_style();
     }
     pub fn select_all(&mut self) {
+        self.table_selection = None;
         let a = self.doc.addresses();
         if let (Some(first), Some(last)) = (a.first(), a.last()) {
             self.anchor = Position {
@@ -765,6 +793,7 @@ impl Editor {
             self.revision += 1;
             self.redo.clear();
             self.last_insert = Some((Instant::now(), self.caret, style));
+            self.refresh_automatic_table(self.caret.address.block);
             return;
         }
         let parts = text

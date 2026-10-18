@@ -1,6 +1,6 @@
 # Editor audit and document compatibility
 
-18 October 2026 · AlphaDocs 0.1.6
+18 October 2026 · AlphaDocs 0.1.7
 
 This audit checks ordinary writing workflows against the documented capabilities of [Word](https://learn.microsoft.com/en-us/office365/servicedescriptions/office-online-service-description/word-online) and [Google Docs](https://support.google.com/docs/answer/1696711?hl=en). It does not claim full engine or layout parity. Preserve the original source when importing an unfamiliar document and read the import/export notices.
 
@@ -18,9 +18,9 @@ This audit checks ordinary writing workflows against the documented capabilities
 
 ## Tables
 
-Insert/delete/move tables, add/delete rows/columns, select a row/column, copy and format selected cells, and undo are implemented. **Cell background and borders…** changes a cell, selected row or selected column. Fill-only changes preserve each cell’s existing edges. Border colour and width are physical document styling, independent of Light/Dark mode; zero width removes the edges. Screen, PDF, DOCX and rich export table styles use these values.
+Insert/delete/move tables, add/delete rows/columns, select a cell/row/column, copy and format selected cells, and undo are implemented. **Cell background and borders…** changes a cell, selected row or selected column. Fill-only changes preserve each cell’s existing edges. Border colour and width are physical document styling, independent of Light/Dark mode; zero width removes the edges. Screen, PDF, DOCX and rich export table styles use these values.
 
-**Formula…** replaces the current cell with a result. **Recalculate table** updates formula cells together, or leaves the table untouched if any calculation fails. Editing a result replaces its formula; Undo restores it. This follows Word’s explicit table-field workflow, not spreadsheet-style continuous recalculation. [Word table formulas](https://support.microsoft.com/en-us/word/use-a-formula-in-a-word-table).
+**Formula…** replaces the current cell with a result. **Recalculate table** updates formula cells together, or leaves the table untouched if any calculation fails. Editing a result replaces its formula; Undo restores it. Preferences → General → **Automatically recalculate table formulas** enables recalculation during local table edits. It defaults off. Source edits and their calculated results share one Undo entry; invalid inputs preserve cached results and display a message. Automatic work is bounded across the whole table. Formula dialogs preview the result and suggest LEFT or ABOVE from nearby numeric cells. [Word table formulas](https://support.microsoft.com/en-us/word/use-a-formula-in-a-word-table).
 
 Supported: arithmetic `+ - * / ^`, parentheses, cell references `A1`, ranges `A1:B3`, `ABOVE/BELOW/LEFT/RIGHT`, and `SUM/PRODUCT/AVERAGE/COUNT/MIN/MAX/ABS/INT/ROUND`. Number formatting is automatic or 0–8 decimals. Circular references, invalid cells, overflow and division by zero produce errors before changes are committed. Inputs/work are bounded. Currency/thousands parsing, Word’s full function/mask language and spreadsheet-style reference adjustment when rows move are not implemented. Imported unfamiliar Word number masks and their cached results are preserved; recalculation asks for an explicitly supported format.
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.7 — 18 October 2026
+
+- Added Select cell alongside Select row and Select column. Cell selection supports copying, formatting, clearing and Undo, including empty cells.
+- Table calculation commands sit beside selection commands, above structural edits, so they remain visible in shorter context menus.
+- Formula dialogs choose a sum direction from nearby numeric cells, show the target cell and preview the result. Empty header rows no longer cause a misleading default SUM(ABOVE) for numbers to the left.
+- Added Preferences → General → Automatically recalculate table formulas. It is off by default; when enabled, edits update dependent formula results in the same Undo operation. Manual Recalculate table remains available.
+- Automatic calculations have a bounded whole-table work budget. Invalid inputs leave cached results intact and show a calculation message instead of partially rewriting a table.
+
 ## 0.1.6 — 18 October 2026
 
 - Fixed a destructive DOCX import branch that replaced paragraphs containing borders with horizontal rules, discarding their story text. Nonempty paragraphs and empty/nil border overrides now retain text/styles and actual borders/shading.

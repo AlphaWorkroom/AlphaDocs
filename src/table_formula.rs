@@ -19,6 +19,65 @@ pub fn evaluate(
     let mut budget = 100_000;
     expression(rows, (row, column), formula, &mut visited, &mut budget)
 }
+/// Evaluate a whole table before writing anything. One shared work budget
+/// bounds automatic recalculation, including repeated dependency traversal.
+pub fn calculate(rows: &[Vec<Paragraph>]) -> Result<Vec<(usize, usize, String)>, String> {
+    if rows.iter().map(Vec::len).sum::<usize>() > 100_000 {
+        return Err("Table is outside the calculation limits".into());
+    }
+    let mut results = Vec::new();
+    let mut budget = 100_000;
+    for (row, cells) in rows.iter().enumerate() {
+        for (column, paragraph) in cells.iter().enumerate() {
+            let Some(formula) = &paragraph.formula else {
+                continue;
+            };
+            let value = if formula.word_number_format.is_some() {
+                Err("This Word number format is preserved with its existing result. Choose Formula and a supported number format to recalculate it.".into())
+            } else if formula.expression.len() > 4096 || !formula.expression.is_ascii() {
+                Err("Use an ASCII formula of at most 4096 characters".into())
+            } else {
+                expression(rows, (row,column), &formula.expression, &mut vec![(row,column)], &mut budget)
+            }.map_err(|e: String| format!("{}: {e}", cell_name(row,column)))?;
+            results.push((row, column, formatted(value, formula.decimals)));
+        }
+    }
+    Ok(results)
+}
+pub fn cell_name(row: usize, column: usize) -> String {
+    let mut letters = Vec::new();
+    let mut column = column;
+    loop {
+        letters.push((b'A' + (column % 26) as u8) as char);
+        if column < 26 {
+            break;
+        }
+        column = column / 26 - 1;
+    }
+    format!(
+        "{}{}",
+        letters.into_iter().rev().collect::<String>(),
+        row.saturating_add(1)
+    )
+}
+/// Suggest a sum from actual numeric cells, rather than from row position alone.
+pub fn suggested_formula(rows: &[Vec<Paragraph>], row: usize, column: usize) -> &'static str {
+    let numeric = |p: &Paragraph| {
+        p.formula.is_some() || p.text().trim().parse::<f64>().is_ok_and(f64::is_finite)
+    };
+    let above = rows
+        .iter()
+        .take(row)
+        .any(|r| r.get(column).is_some_and(numeric));
+    let left = rows
+        .get(row)
+        .is_some_and(|r| r.iter().take(column).any(numeric));
+    if above || !left && row > 0 {
+        "=SUM(ABOVE)"
+    } else {
+        "=SUM(LEFT)"
+    }
+}
 pub fn formatted(value: f64, decimals: Option<u8>) -> String {
     if let Some(digits) = decimals {
         format!("{value:.precision$}", precision = digits.min(8) as usize)

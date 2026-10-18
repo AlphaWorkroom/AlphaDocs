@@ -436,6 +436,15 @@ impl Editor {
     pub fn copy_fragment(&self) -> ClipboardContent {
         if let Some(selection) = self.table_selection() {
             let table = match selection {
+                super::TableSelection::Cell(address) => {
+                    let Some(paragraph) = self.doc.paragraph(address) else {
+                        return ClipboardContent {
+                            text: String::new(),
+                            blocks: vec![],
+                        };
+                    };
+                    vec![vec![paragraph.clone()]]
+                }
                 super::TableSelection::Row { block, row } => {
                     let Some(Block::Table(rows)) = self.doc.blocks.get(block) else {
                         return ClipboardContent {
