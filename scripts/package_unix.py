@@ -5,14 +5,14 @@ import json
 import os
 import platform
 import plistlib
-import re
 import shutil
 import subprocess
 import sys
 import tarfile
+from release_version import read_version, macos_bundle_versions
 
 root = Path(__file__).resolve().parent.parent
-version = re.search(r'^version = "([0-9.]+)"', (root / "Cargo.toml").read_text(), re.M)[1]
+version = read_version(root)
 out = root / "releases"
 out.mkdir(exist_ok=True)
 work = root / "target/package"
@@ -21,6 +21,7 @@ arch = "aarch64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
 outputs = []
 
 if sys.platform == "darwin":
+    bundle_release, bundle_build = macos_bundle_versions(version)
     payload = work / "macos-payload"
     app = payload / "AlphaDocs.app"
     macos = app / "Contents/MacOS"
@@ -43,7 +44,7 @@ if sys.platform == "darwin":
             name = f"icon_{size}x{size}{'@2x' if scale == 2 else ''}.png"
             subprocess.run(["sips", "-z", str(size * scale), str(size * scale), str(root / "assets/alphadocs-icon.png"), "--out", str(icons / name)], check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["iconutil", "-c", "icns", str(icons), "-o", str(resources / "AlphaDocs.icns")], check=True)
-    info = {"CFBundleName": "AlphaDocs", "CFBundleDisplayName": "AlphaDocs", "CFBundleIdentifier": "studio.alphaworkroom.alphadocs", "CFBundleExecutable": "alphadocs", "CFBundleIconFile": "AlphaDocs.icns", "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version, "CFBundleVersion": version, "LSMinimumSystemVersion": "14.0", "NSHighResolutionCapable": True,
+    info = {"CFBundleName": "AlphaDocs", "CFBundleDisplayName": "AlphaDocs", "CFBundleIdentifier": "studio.alphaworkroom.alphadocs", "CFBundleExecutable": "alphadocs", "CFBundleIconFile": "AlphaDocs.icns", "CFBundlePackageType": "APPL", "CFBundleShortVersionString": bundle_release, "CFBundleVersion": bundle_build, "AlphaDocsReleaseVersion": version, "LSMinimumSystemVersion": "14.0", "NSHighResolutionCapable": True,
             "NSMicrophoneUsageDescription": "AlphaDocs uses the microphone only while you explicitly start offline speech input.",
             "CFBundleDocumentTypes": [{"CFBundleTypeName": "AlphaDocs document", "CFBundleTypeExtensions": ["adocs"], "CFBundleTypeRole": "Editor", "LSHandlerRank": "Owner"}]}
     (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))

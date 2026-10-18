@@ -42,9 +42,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: python
         run: |
-          import os, tomllib
-          with open('Cargo.toml', 'rb') as source:
-              version = tomllib.load(source)['package']['version']
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from release_version import read_version
+          version = read_version(Path.cwd())
           assert os.environ['GITHUB_REF_NAME'] == 'v' + version, 'Tag and package version differ'
       - uses: Swatinem/rust-cache@v2
         with:

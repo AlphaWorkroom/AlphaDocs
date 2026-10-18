@@ -3,9 +3,9 @@ from pathlib import Path
 import hashlib
 import json
 import os
-import re
 import subprocess
 import zipfile
+from release_version import read_version
 
 root = Path(__file__).resolve().parent.parent
 dist = root / "dist"
@@ -22,10 +22,11 @@ with zipfile.ZipFile(portable) as archive:
     assert archive.read("AlphaDocs.exe") == (dist / "AlphaDocs.exe").read_bytes()
 compiler = Path(os.environ["WINDIR"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 installer = out / "AlphaDocs-Windows-x86_64-Setup.exe"
-version = re.search(r'^version = "([0-9]+[.][0-9]+[.][0-9]+)"', (root / "Cargo.toml").read_text(), re.M)[1]
+version = read_version(root)
 metadata = root / "target/installer-version.cs"
 metadata.parent.mkdir(exist_ok=True)
-metadata.write_text('[assembly:System.Reflection.AssemblyVersion("' + version + '.0")]\n', encoding="utf-8")
+assembly_version = version if version.count(".") == 3 else version + ".0"
+metadata.write_text('[assembly:System.Reflection.AssemblyVersion("' + assembly_version + '")]\n', encoding="utf-8")
 subprocess.run([
     str(compiler), "/nologo", "/target:winexe", "/optimize+",
     "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll",

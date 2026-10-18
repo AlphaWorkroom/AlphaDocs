@@ -4,6 +4,25 @@ use serde::Deserialize;
 use std::time::Duration;
 pub const RELEASES: &str = "https://github.com/AlphaWorkroom/AlphaDocs/releases/latest";
 const API: &str = "https://api.github.com/repos/AlphaWorkroom/AlphaDocs/releases/latest";
+pub const VERSION: &str = env!("ALPHADOCS_VERSION");
+
+pub(crate) fn stable_version(value: &str) -> Result<[u64; 4], String> {
+    let parts: Vec<_> = value.split('.').collect();
+    if !(3..=4).contains(&parts.len()) {
+        return Err("Expected a three- or four-part numeric version".into());
+    }
+    let mut numbers = [0; 4];
+    for (index, part) in parts.iter().enumerate() {
+        if part.is_empty()
+            || !part.bytes().all(|b| b.is_ascii_digit())
+            || part.len() > 1 && part.starts_with('0')
+        {
+            return Err("Expected canonical numeric version components".into());
+        }
+        numbers[index] = part.parse().map_err(|_| "Version component is too large")?;
+    }
+    Ok(numbers)
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Available {
     pub version: String,
@@ -61,13 +80,13 @@ fn parse(bytes: &[u8], current: &str, os: &str, arch: &str) -> Result<Option<Ava
         .tag_name
         .strip_prefix('v')
         .unwrap_or(&release.tag_name);
-    let next = semver::Version::parse(version).map_err(|_| "Invalid release version")?;
-    let current = semver::Version::parse(current).map_err(|_| "Invalid installed version")?;
-    if !next.pre.is_empty() || !next.build.is_empty() || next <= current {
+    let next = stable_version(version).map_err(|_| "Invalid release version")?;
+    let current = stable_version(current).map_err(|_| "Invalid installed version")?;
+    if next <= current {
         return Ok(None);
     }
     // Only canonical numeric version tags and this exact repository may open.
-    if release.tag_name != format!("v{next}") {
+    if release.tag_name != format!("v{version}") {
         return Err("Non-canonical release tag".into());
     }
     let page = format!(
@@ -128,7 +147,7 @@ fn parse(bytes: &[u8], current: &str, os: &str, arch: &str) -> Result<Option<Ava
         )
     };
     Ok(Some(Available {
-        version: next.to_string(),
+        version: version.to_owned(),
         url: page,
         asset,
         install_error,
@@ -166,7 +185,7 @@ pub fn check() -> Result<Option<Available>, String> {
         .map_err(|e| e.to_string())?;
     parse(
         &bytes,
-        env!("CARGO_PKG_VERSION"),
+        VERSION,
         std::env::consts::OS,
         std::env::consts::ARCH,
     )
@@ -174,6 +193,39 @@ pub fn check() -> Result<Option<Available>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn four_part_patches_compare_numerically_and_keep_canonical_asset_urls() {
+        let bytes = release(
+            "v0.1.8.1",
+            false,
+            false,
+            "https://github.com/AlphaWorkroom/AlphaDocs/releases/tag/v0.1.8.1",
+        );
+        let next = parse(&bytes, "0.1.8", "windows", "x86_64")
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.version, "0.1.8.1");
+        assert!(next.asset.unwrap().url.contains("/v0.1.8.1/"));
+        for current in ["0.1.8.1", "0.1.8.2", "0.1.9", "0.1.10"] {
+            assert!(
+                parse(&bytes, current, "windows", "x86_64")
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert!(stable_version("0.1.8.10").unwrap() > stable_version("0.1.8.2").unwrap());
+        for invalid in [
+            "0.1.8.01",
+            "0.1.8.1/other",
+            "0.1.8+patch.1",
+            "0.1.8-1",
+            "0.1",
+            "0.1.8.1.1",
+            "0.1.8.",
+        ] {
+            assert!(stable_version(invalid).is_err(), "{invalid}");
+        }
+    }
     #[test]
     fn mac_updates_choose_only_the_correct_architecture_dmg() {
         for arch in ["aarch64", "x86_64"] {

@@ -3,7 +3,7 @@
 fn main() -> eframe::Result {
     let command = std::env::args().nth(1);
     if command.as_deref() == Some("--version") {
-        println!("AlphaDocs {}", env!("CARGO_PKG_VERSION"));
+        println!("AlphaDocs {}", env!("ALPHADOCS_VERSION"));
         return Ok(());
     }
     if command.as_deref() == Some("--self-check") {
@@ -21,7 +21,7 @@ fn main() -> eframe::Result {
         assert!(!app_icon().rgba.is_empty());
         println!(
             "AlphaDocs {} native fonts, image and measured layout OK",
-            env!("CARGO_PKG_VERSION")
+            env!("ALPHADOCS_VERSION")
         );
         return Ok(());
     }

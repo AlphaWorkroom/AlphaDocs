@@ -110,7 +110,8 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
         .frame(Frame::new().fill(p.chrome))
         .show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let width = ui.available_width().min(1128.0);
+                // Five 210px cards with four 20px gaps; also fits all seven templates.
+                let width = ui.available_width().min(1130.0);
                 Frame::new()
                     .fill(p.toolbar)
                     .inner_margin(Margin::same(24))
@@ -135,7 +136,7 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
                                     (5, "Meeting notes", "Essential"),
                                     (6, "Essay", "Classic"),
                                 ] {
-                                    ui.vertical(|ui| {
+                                    ui.allocate_ui_with_layout(vec2(146.0, 230.0), UiLayout::top_down(Align::Min), |ui| {
                                         let (r, response) = ui.allocate_exact_size(
                                             vec2(146.0, 185.0),
                                             Sense::click(),
@@ -247,7 +248,9 @@ pub(super) fn show(app: &mut AlphaDocs, ui: &mut Ui) {
                         for i in indices {
                             let recent = &app.recents[i];
                             let doc = &recent.doc;
-                            ui.vertical(|ui| {
+                            // Reserve the whole card before laying it out, so the
+                            // wrapping row can move it before it crosses the edge.
+                            ui.allocate_ui_with_layout(vec2(210.0, 353.0), UiLayout::top_down(Align::Min), |ui| {
                                 ui.spacing_mut().item_spacing.y = 0.0;
                                 let (_, r) = ui.allocate_space(vec2(210.0, 265.0));
                                 let response = ui.interact(
@@ -406,6 +409,7 @@ fn document_menu(
     }
 }
 fn centered(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui)) {
+    let width = width.min(ui.available_width());
     let margin = ((ui.available_width() - width) * 0.5).max(0.0);
     ui.horizontal(|ui| {
         ui.add_space(margin);

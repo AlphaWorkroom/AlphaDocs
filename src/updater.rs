@@ -167,13 +167,7 @@ fn prepare(
 }
 
 fn validate_asset(version: &str, asset: &ReleaseAsset) -> Result<(), DownloadError> {
-    let parsed = semver::Version::parse(version)
-        .map_err(|_| "Invalid update version metadata".to_owned())?;
-    if parsed.to_string() != version || !parsed.pre.is_empty() || !parsed.build.is_empty() {
-        return Err("Only canonical stable update versions are accepted"
-            .to_owned()
-            .into());
-    }
+    updates::stable_version(version).map_err(|_| "Invalid update version metadata".to_owned())?;
     let expected_name = updates::installer(std::env::consts::OS, std::env::consts::ARCH)
         .ok_or_else(|| "Automatic installation is unavailable on this platform.".to_owned())?;
     if asset.name != expected_name {
@@ -749,6 +743,19 @@ mod tests {
             size: bytes.len() as u64,
             sha256: format!("{:x}", Sha256::digest(bytes)),
         }
+    }
+
+    #[test]
+    fn four_part_patch_keeps_exact_installer_and_tag_validation() {
+        let name = updates::installer(std::env::consts::OS, std::env::consts::ARCH).unwrap();
+        let mut meta = asset(b"verified download");
+        meta.name = name.into();
+        meta.url =
+            format!("https://github.com/AlphaWorkroom/AlphaDocs/releases/download/v0.1.8.1/{name}");
+        assert!(validate_asset("0.1.8.1", &meta).is_ok());
+        assert!(validate_asset("0.1.8.01", &meta).is_err());
+        meta.url = meta.url.replace("v0.1.8.1/", "v0.1.8/");
+        assert!(validate_asset("0.1.8.1", &meta).is_err());
     }
 
     #[test]

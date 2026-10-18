@@ -943,6 +943,65 @@ fn homepage_document_preview_and_vector_options_open_real_menus() {
 }
 
 #[test]
+fn homepage_recent_cards_wrap_inside_window_after_resizing() {
+    for theme in [Theme::Light, Theme::Dark] {
+        let (ctx, mut app) = editor();
+        app.home = true;
+        app.prefs.theme = theme;
+        app.recents = (0..13)
+            .map(|i| Recent {
+                path: PathBuf::from(format!("qa/card-{i}.adocs")),
+                doc: Document::new(&format!("Document {i} with a longer title")),
+                modified: 0,
+            })
+            .collect();
+        for width in [1574.0, 960.0, 1920.0, 960.0] {
+            for _ in 0..3 {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 800.0))),
+                        ..Default::default()
+                    },
+                    |ui| app.update_ui(ui),
+                );
+                output.textures_delta.clear();
+            }
+            let rects: Vec<_> = app
+                .recents
+                .iter()
+                .map(|recent| {
+                    ctx.read_response(Id::new(("recent_document", &recent.doc.id)))
+                        .unwrap()
+                        .rect
+                })
+                .collect();
+            for rect in &rects {
+                assert!(
+                    rect.left() >= 0.0 && rect.right() <= width,
+                    "{theme:?} {width}: {rect:?}"
+                );
+            }
+            assert!(
+                rects.last().unwrap().top() > rects[0].bottom(),
+                "cards did not wrap: {width} {rects:?}"
+            );
+            for pair in rects.windows(2) {
+                assert!(!pair[0].intersects(pair[1]), "overlapping cards: {pair:?}");
+            }
+            if width >= 1574.0 {
+                assert_eq!(
+                    rects
+                        .iter()
+                        .filter(|r| (r.top() - rects[0].top()).abs() < 0.1)
+                        .count(),
+                    5
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn image_body_drag_reorders_and_float_drag_positions_with_one_undo_for_fast_events() {
     for coalesced in [false, true] {
         let (ctx, mut app) = image_app();

@@ -1,7 +1,7 @@
-# AlphaDocs 0.1.8
+# AlphaDocs 0.1.8.1
 
-- Fixed Windows in-app updates rejecting portable or renamed copies downloaded from GitHub. Updates install into the standard per-user AlphaDocs folder and relaunch the installed app; the original portable folder is retained.
-- The update window explains the installation destination and directs portable users to the Start-menu app afterwards.
-- Added regression checks for installed, portable and renamed clients, including a fresh installation from a portable copy.
+- Recent documents wrap into neat rows within the homepage instead of extending off screen.
+- Template cards and centred homepage content stay within the available width when the window is resized.
+- Added support for four-part patch version numbers throughout the app and update/release packaging.
 
-Versions 0.1.6 and 0.1.7 contain the old folder restriction. If one of those versions shows “Install with AlphaDocs Setup first”, download and run the Windows Setup once, then open AlphaDocs from the Start menu. The document library stays in place.
+Download this patch manually from GitHub when upgrading an older version; earlier updaters only recognise three-part release numbers. This version recognises both formats for future updates.

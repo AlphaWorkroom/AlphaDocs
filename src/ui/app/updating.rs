@@ -241,7 +241,7 @@ impl AlphaDocs {
                 ui.add_space(8.0);ui.label(RichText::new(if busy {"Updating AlphaDocs"}else{"AlphaDocs updates"}).size(24.0));
             });
             ui.add_space(18.0);
-            ui.label(RichText::new(format!("Installed version {}",env!("CARGO_PKG_VERSION"))).size(12.0).color(p.muted));
+            ui.label(RichText::new(format!("Installed version {}",env!("ALPHADOCS_VERSION"))).size(12.0).color(p.muted));
             if let Some(available)=&self.update_state.available {ui.add_space(4.0);ui.label(RichText::new(format!("Version {}",available.version)).strong().size(18.0));}
             ui.add_space(14.0);
             ui.label(RichText::new(&self.update_state.detail).color(if self.update_state.error {if p.dark {Color32::from_rgb(255,180,171)}else{Color32::from_rgb(179,38,30)}}else{p.text}));

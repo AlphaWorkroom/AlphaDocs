@@ -9,7 +9,7 @@ impl AlphaDocs {
                 ui.label(RichText::new("AlphaDocs").size(28.0).strong());
                 ui.label("AlphaDocs by Alpha Workroom");
                 ui.label(
-                    RichText::new(concat!("Version ", env!("CARGO_PKG_VERSION")))
+                    RichText::new(concat!("Version ", env!("ALPHADOCS_VERSION")))
                         .size(12.0)
                         .color(p.muted),
                 );
