@@ -64,7 +64,24 @@ impl AlphaDocs {
         }
         // An image is a document selection even if a non-text toolbar button
         // currently owns toolkit focus. Sidebar/title text fields returned above.
-        let canvas_focused = canvas_focused || self.image_block.is_some();
+        let restore_delete_focus = !canvas_focused
+            && !egui::Popup::is_any_open(ctx)
+            && ctx.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        Event::Key {
+                            key: Key::Backspace | Key::Delete,
+                            pressed: true,
+                            ..
+                        }
+                    )
+                })
+            });
+        if restore_delete_focus {
+            self.refocus = true;
+        }
+        let canvas_focused = canvas_focused || self.image_block.is_some() || restore_delete_focus;
         if !self.session.viewing
             && (self.image_block.is_some() || self.session.editor.has_scalar_selection())
             && ctx.input_mut(|i| {

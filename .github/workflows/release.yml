@@ -56,9 +56,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libdbus-1-dev libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libasound2-dev xvfb
       - name: Prepare pinned Vosk runtime for optional speech worker
         run: python scripts/prepare_speech.py --prepare-native
-      - run: cargo fmt --check
-      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
-      - run: cargo test --locked --all-features
       - run: cargo build --locked --release
       - name: Build optional offline speech sidecar
         run: cargo build --locked --release --features speech-worker --bin alphadocs-speech
@@ -176,3 +173,33 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" artifacts/* --title "AlphaDocs $GITHUB_REF_NAME" --notes-file docs/RELEASE_NOTES.md --verify-tag
+
+  verify:
+    needs: [build, publish]
+    if: always() && needs.build.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-22.04, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: '3'
+      CARGO_INCREMENTAL: '0'
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libdbus-1-dev libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libasound2-dev
+      - run: python scripts/prepare_speech.py --prepare-native
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --all-features

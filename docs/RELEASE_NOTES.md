@@ -1,4 +1,5 @@
-# AlphaDocs 0.1.10
+# AlphaDocs 0.1.11
 
-- Recent documents wrap into neat rows within the homepage instead of extending off screen. Template cards and centred content stay within the available width when resizing.
-- Fixed document-ID collisions during rapid document creation. Existing documents retain their IDs and save locations.
+- Right-click a hyperlink to find **Open to link** at the top of its menu.
+- Fixed Ctrl-click/Cmd-click opening the same hyperlink twice.
+- Backspace and Delete recover document focus after non-text controls or browser navigation, while text fields and read-only documents keep their normal protections.

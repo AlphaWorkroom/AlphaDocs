@@ -152,6 +152,7 @@ pub struct AlphaDocs {
     find_index: usize,
     find_active: bool,
     link_url: String,
+    context_link: Option<String>,
     link_text: String,
     image_lock_ratio: bool,
     image_options_open: bool,
@@ -302,6 +303,7 @@ impl AlphaDocs {
             find_index: 0,
             find_active: false,
             link_url: String::new(),
+            context_link: None,
             link_text: String::new(),
             image_lock_ratio: true,
             image_options_open: false,
@@ -2180,6 +2182,7 @@ impl AlphaDocs {
         let ruler = if self.prefs.ruler { 24.0 } else { 0.0 };
         let page_setup = self.session.editor.doc.page.clone();
         let mut target = None;
+        let mut activate_link = false;
         let mut gesture_anchor = None;
         let mut image_clicked = None;
         let mut image_action = None;
@@ -2922,6 +2925,7 @@ impl AlphaDocs {
                 && let Some(pointer) = response.interact_pointer_pos()
             {
                 self.live_proof.context = None;
+                self.context_link = None;
                 let page = (((pointer.y - start_y) / (h + gap)).floor().max(0.0) as usize)
                     .min(l.pages - 1);
                 let point = pos2(
@@ -2945,6 +2949,11 @@ impl AlphaDocs {
                             (point.x - line.rect.left()) * scale,
                         ),
                     };
+                    self.context_link = line
+                        .rect
+                        .contains(point)
+                        .then(|| document_link_at(&self.session.editor.doc, pos))
+                        .flatten();
                     // A table command targets the cell under the context click,
                     // even when the insertion caret was in another table.
                     if pos.address != self.session.editor.caret.address {
@@ -3115,6 +3124,12 @@ impl AlphaDocs {
                     .id_salt("canvas_context_commands")
                     .max_height((ui.ctx().content_rect().height() - 32.0).max(160.0))
                     .show(ui, |ui| {
+                        if let Some(url) = &self.context_link {
+                            if menu(ui, "Open to link", "", true) {
+                                ctx.open_url(egui::OpenUrl::new_tab(url.clone()));
+                            }
+                            ui.separator();
+                        }
                         let (corrected, open_proof) = live_proofing::context_menu(
                             ui,
                             &mut self.live_proof,
@@ -3186,6 +3201,7 @@ impl AlphaDocs {
                         }
                     });
             });
+            activate_link = response.clicked_by(egui::PointerButton::Primary);
         });
         if let Some(mut anchor) = gesture_anchor {
             if let Some(paragraph) = self.session.editor.doc.paragraph(anchor.address) {
@@ -3203,15 +3219,10 @@ impl AlphaDocs {
         if let Some((mut pos, extend, double, triple)) = target
             && let Some(para) = self.session.editor.doc.paragraph(pos.address)
         {
-            if !extend
+            if activate_link
+                && !extend
                 && (self.session.viewing || ctx.input(|i| i.modifiers.command))
-                && let Some(url) = para
-                    .chars
-                    .get(pos.offset)
-                    .and_then(|c| c.style.link.clone())
-                && (url.starts_with("https://")
-                    || url.starts_with("http://")
-                    || url.starts_with("mailto:"))
+                && let Some(url) = document_link_at(&self.session.editor.doc, pos)
             {
                 ctx.open_url(egui::OpenUrl::new_tab(url));
                 return scroll_output.id;
@@ -3705,6 +3716,18 @@ fn paint_box(ui: &Ui, rect: Rect, style: BoxStyle, scale: f32) {
             );
         }
     }
+}
+
+fn document_link_at(doc: &Document, pos: Position) -> Option<String> {
+    let paragraph = doc.paragraph(pos.address)?;
+    let offset = if pos.offset == paragraph.chars.len() {
+        pos.offset.checked_sub(1)?
+    } else {
+        pos.offset
+    };
+    let link = paragraph.chars.get(offset)?.style.link.clone()?;
+    let parsed = url::Url::parse(&link).ok()?;
+    matches!(parsed.scheme(), "http" | "https" | "mailto").then_some(link)
 }
 
 fn safe_name(t: &str) -> String {

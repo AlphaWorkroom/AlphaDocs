@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11
+
+- Hyperlink context menus start with Open to link and target the link under the pointer.
+- Ctrl-click on Windows and Cmd-click on macOS activate a link only when the click completes, avoiding duplicate browser opens.
+- Backspace/Delete restore document input when canvas focus has been lost to non-text controls. Editable fields and read-only documents retain their input protections.
+- Full format, Clippy and editor test jobs run after publication; native package construction and installer checks still produce valid downloads first.
+
 ## 0.1.10
 
 - Includes the homepage card-wrapping correction from the unpublished 0.1.9 build.

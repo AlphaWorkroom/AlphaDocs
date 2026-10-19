@@ -20,6 +20,246 @@ fn mac_command() -> egui::Modifiers {
         ..Default::default()
     }
 }
+
+#[test]
+fn character_and_empty_line_deletion_through_successive_frames() {
+    for mac in [false, true] {
+        let (ctx, mut app) = editor();
+        if mac {
+            ctx.set_os(egui::os::OperatingSystem::Mac);
+        }
+        app.session.editor.insert("a👩🏽‍💻e\u{301}\n\nLast");
+        image_frame(&ctx, &mut app, vec![]);
+        image_frame(&ctx, &mut app, vec![]);
+        ctx.memory_mut(|m| m.request_focus(Id::new("document_canvas")));
+        // Use actual grapheme boundaries rather than the scalar count of the emoji.
+        let end = app
+            .session
+            .editor
+            .doc
+            .paragraph(Address::default())
+            .unwrap()
+            .chars
+            .len();
+        app.session.editor.place(
+            Position {
+                address: Address::default(),
+                offset: end,
+            },
+            false,
+        );
+        image_frame(
+            &ctx,
+            &mut app,
+            vec![key(Key::Backspace, egui::Modifiers::NONE)],
+        );
+        assert_eq!(
+            app.session
+                .editor
+                .doc
+                .paragraph(Address::default())
+                .unwrap()
+                .text(),
+            "a👩🏽‍💻"
+        );
+        image_frame(
+            &ctx,
+            &mut app,
+            vec![key(Key::Backspace, egui::Modifiers::NONE)],
+        );
+        assert_eq!(
+            app.session
+                .editor
+                .doc
+                .paragraph(Address::default())
+                .unwrap()
+                .text(),
+            "a"
+        );
+        app.session.editor.place(
+            Position {
+                address: Address {
+                    block: 1,
+                    ..Default::default()
+                },
+                offset: 0,
+            },
+            false,
+        );
+        image_frame(
+            &ctx,
+            &mut app,
+            vec![key(Key::Delete, egui::Modifiers::NONE)],
+        );
+        assert_eq!(app.session.editor.doc.text(), "a\nLast");
+        image_frame(
+            &ctx,
+            &mut app,
+            vec![key(Key::Backspace, egui::Modifiers::NONE)],
+        );
+        assert_eq!(app.session.editor.doc.text(), "aLast");
+        image_frame(&ctx, &mut app, vec![key(Key::Z, egui::Modifiers::COMMAND)]);
+        assert_eq!(app.session.editor.doc.text(), "a\nLast");
+        // Returning from browser/chrome controls can leave no canvas focus.
+        app.session.editor.place(
+            Position {
+                address: Address::default(),
+                offset: 1,
+            },
+            false,
+        );
+        ctx.memory_mut(|m| m.surrender_focus(Id::new("document_canvas")));
+        image_frame(
+            &ctx,
+            &mut app,
+            vec![key(Key::Delete, egui::Modifiers::NONE)],
+        );
+        assert_eq!(app.session.editor.doc.text(), "aLast");
+        image_frame(&ctx, &mut app, vec![key(Key::Z, egui::Modifiers::COMMAND)]);
+        assert_eq!(app.session.editor.doc.text(), "a\nLast");
+    }
+}
+
+#[test]
+fn hyperlink_gestures_open_once_and_context_menu_targets_clicked_link_first() {
+    for mac in [false, true] {
+        let (ctx, mut app) = editor();
+        if mac {
+            ctx.set_os(egui::os::OperatingSystem::Mac);
+        }
+        app.prefs.outline = false;
+        app.prefs.ruler = false;
+        app.session.editor.insert("First link and second link");
+        app.session.editor.select_all();
+        app.session
+            .editor
+            .format(|s| s.link = Some("https://example.com/first".into()));
+        app.session.editor.place(Position::default(), false);
+        let frame = |app: &mut AlphaDocs, mut events: Vec<Event>, modifiers: egui::Modifiers| {
+            events.insert(0, Event::ModifiersChanged(modifiers));
+            let mut input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0))),
+                events,
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(app, &ctx, &mut input);
+            let mut output = ctx.run_ui(input, |ui| app.update_ui(ui));
+            output.textures_delta.clear();
+            output
+                .platform_output
+                .commands
+                .into_iter()
+                .filter_map(|command| match command {
+                    egui::OutputCommand::OpenUrl(url) => Some(url.url),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        frame(&mut app, vec![], egui::Modifiers::NONE);
+        frame(&mut app, vec![], egui::Modifiers::NONE);
+        let area = ctx.read_response(Id::new("document_canvas")).unwrap().rect;
+        let layout = app.layout.as_ref().unwrap();
+        let scale = 4.0 / 3.0 * app.prefs.zoom;
+        let left =
+            (area.left() + (area.width() - layout.size.x * scale) * 0.5).max(area.left() + 24.0);
+        let line = &layout.lines[0];
+        let point = pos2(
+            left + (line.rect.left() + 12.0) * scale,
+            area.top() + 12.0 + line.rect.center().y * scale,
+        );
+        let command = if mac {
+            mac_command()
+        } else {
+            egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..Default::default()
+            }
+        };
+        let click = |pressed, button, modifiers| Event::PointerButton {
+            pos: point,
+            button,
+            pressed,
+            modifiers,
+        };
+        assert!(
+            frame(
+                &mut app,
+                vec![
+                    Event::PointerMoved(point),
+                    click(true, egui::PointerButton::Primary, command)
+                ],
+                command
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            frame(
+                &mut app,
+                vec![click(false, egui::PointerButton::Primary, command)],
+                command
+            ),
+            ["https://example.com/first"]
+        );
+        assert!(frame(&mut app, vec![], egui::Modifiers::NONE).is_empty());
+        assert_eq!(
+            frame(
+                &mut app,
+                vec![
+                    click(true, egui::PointerButton::Primary, command),
+                    click(false, egui::PointerButton::Primary, command)
+                ],
+                command
+            ),
+            ["https://example.com/first"]
+        );
+        frame(
+            &mut app,
+            vec![click(
+                true,
+                egui::PointerButton::Secondary,
+                egui::Modifiers::NONE,
+            )],
+            egui::Modifiers::NONE,
+        );
+        assert!(
+            frame(
+                &mut app,
+                vec![click(
+                    false,
+                    egui::PointerButton::Secondary,
+                    egui::Modifiers::NONE
+                )],
+                egui::Modifiers::NONE
+            )
+            .is_empty()
+        );
+        frame(&mut app, vec![], egui::Modifiers::NONE);
+        let open = ctx
+            .data_mut(|d| d.get_temp::<Rect>(Id::new(("menu_bounds", "Open to link"))))
+            .expect("open link menu row");
+        let cut = ctx
+            .data_mut(|d| d.get_temp::<Rect>(Id::new(("menu_bounds", "Cut"))))
+            .unwrap();
+        assert!(open.top() < cut.top());
+        frame(
+            &mut app,
+            vec![
+                Event::PointerMoved(open.center()),
+                pointer(open.center(), egui::PointerButton::Primary, true),
+            ],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(
+            frame(
+                &mut app,
+                vec![pointer(open.center(), egui::PointerButton::Primary, false)],
+                egui::Modifiers::NONE
+            ),
+            ["https://example.com/first"]
+        );
+    }
+}
 #[test]
 fn mac_command_formatting_undo_redo_and_find_use_real_frames() {
     let (ctx, mut app) = editor();
