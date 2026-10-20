@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.1.11
+## 0.1.12
+
+- Offline speech setup allows five minutes for complete model/runtime transfers instead of aborting after 20 seconds of total download time. Pinned sizes and hashes remain enforced.
+- Includes hyperlink and deletion-focus fixes from the unpublished 0.1.11 build. Shift-click selection is covered by additional UI-frame checks.
+
+## 0.1.11 (unpublished)
 
 - Hyperlink context menus start with Open to link and target the link under the pointer.
 - Ctrl-click on Windows and Cmd-click on macOS activate a link only when the click completes, avoiding duplicate browser opens.

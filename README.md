@@ -31,7 +31,7 @@ The Windows installer requires .NET Framework 4.8. Downloads include the app, it
 
 ## Features
 
-New in 0.1.11: hyperlink context actions, single-click link activation and deletion-key focus recovery. See the [editor audit and compatibility limits](docs/EDITOR_COMPATIBILITY.md).
+New in 0.1.12: reliable speech setup downloads, hyperlink context actions, single-click link activation and deletion-key focus recovery. See the [editor audit and compatibility limits](docs/EDITOR_COMPATIBILITY.md).
 
 
 ### Multiple documents. One window.

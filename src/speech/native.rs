@@ -128,7 +128,8 @@ pub(super) fn install(
             .https_only(true)
             .max_redirects(4)
             .timeout_global(Some(std::time::Duration::from_secs(300)))
-            .timeout_recv_body(Some(std::time::Duration::from_secs(20)))
+            // This bounds the entire body transfer, not time between chunks.
+            .timeout_recv_body(Some(std::time::Duration::from_secs(300)))
             .build()
             .into();
         let mut response = agent
