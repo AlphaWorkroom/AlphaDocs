@@ -202,6 +202,37 @@ fn hyperlink_gestures_open_once_and_context_menu_targets_clicked_link_first() {
             ["https://example.com/first"]
         );
         assert!(frame(&mut app, vec![], egui::Modifiers::NONE).is_empty());
+        // Shift-click extends selection; it must never navigate, even when
+        // Command/Ctrl is also held or press/release arrive in one frame.
+        for modifiers in [egui::Modifiers::SHIFT, command | egui::Modifiers::SHIFT] {
+            assert!(
+                frame(
+                    &mut app,
+                    vec![click(true, egui::PointerButton::Primary, modifiers)],
+                    modifiers,
+                )
+                .is_empty()
+            );
+            assert!(
+                frame(
+                    &mut app,
+                    vec![click(false, egui::PointerButton::Primary, modifiers)],
+                    modifiers,
+                )
+                .is_empty()
+            );
+            assert!(
+                frame(
+                    &mut app,
+                    vec![
+                        click(true, egui::PointerButton::Primary, modifiers),
+                        click(false, egui::PointerButton::Primary, modifiers),
+                    ],
+                    modifiers,
+                )
+                .is_empty()
+            );
+        }
         assert_eq!(
             frame(
                 &mut app,
